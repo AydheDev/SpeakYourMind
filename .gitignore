@@ -1,0 +1,11 @@
+bin/
+obj/
+dist/
+artifacts/
+*.user
+*.suo
+*.dll
+*.pdb
+*.zip
+credentials*
+.env*
