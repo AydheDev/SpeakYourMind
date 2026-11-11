@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>SpeakYourMind</AssemblyName>
+    <RootNamespace>SpeakYourMind</RootNamespace>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <OutputPath>../1.7/Assemblies/</OutputPath>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <RimWorldDir Condition="'$(RimWorldDir)' == ''">$(RIMWORLD_DIR)</RimWorldDir>
+    <HarmonyDll Condition="'$(HarmonyDll)' == ''">$(HARMONY_DLL)</HarmonyDll>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="Assembly-CSharp"><HintPath>$(RimWorldDir)/Assembly-CSharp.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityStubs"><HintPath>$(RimWorldDir)/UnityStubs.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Waylith.UnityCompat"><HintPath>$(RimWorldDir)/Waylith.UnityCompat.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="0Harmony"><HintPath>$(HarmonyDll)</HintPath><Private>false</Private></Reference>
+    <Reference Include="System.Security.Cryptography.ProtectedData"><HintPath>$(RimWorldDir)/System.Security.Cryptography.ProtectedData.dll</HintPath><Private>false</Private></Reference>
+  </ItemGroup>
+</Project>

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Defs>
+  <MainButtonDef>
+    <defName>SYM_History</defName>
+    <label>Voices</label>
+    <description>SpeakYourMind colony transcript, pawn memories and player annotations.</description>
+    <tabWindowClass>SpeakYourMind.HistoryTab</tabWindowClass>
+    <order>95</order>
+  </MainButtonDef>
+</Defs>

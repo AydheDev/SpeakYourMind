@@ -1,0 +1,69 @@
+# Agreed design and implementation boundaries
+
+## Product
+
+SpeakYourMind conveys the world from each pawn's perspective. It is presentation only. Generated exchanges and memory never change gameplay relationships, moods, jobs or decisions. Initial target: RimWorld 1.7, Expanded bubble display first, original compatibility when its interface matches.
+
+## Player experience
+
+- Dialogue, narration or hybrid; hybrid default.
+- Brief, standard or descriptive; standard default, optional hard character cap.
+- Four activity levels: Quiet, Balanced, Lively (default 3), Chatty.
+- All pawn groups eligible, including context-appropriate animal sounds and machine signals.
+- Observed/selected pawns prioritized; limited simultaneous bubbles.
+- Social exchanges and spontaneous reactions: needs, health, combat, colony events, environment.
+- Flashing dots while waiting. Everyday expressions can tolerate delay. Combat uses short, non-specific fallbacks; late answers do not overwrite them.
+- During pause: outstanding requests may complete, but animation, lifetimes and response release wait for resume.
+- Two to four turns per short exchange; transcripts contain actual displayed text.
+
+## Knowledge and identity
+
+Personal perspective is primary. Broad colony awareness remains available without pretending everyone witnessed an event. Verified facts, generated conversations and subjective characterization are labeled separately. Colony awareness is restricted for outsiders so enemies do not acquire private colony knowledge. Species, age, background, traits, skills, beliefs, relationships, physical state, apparel, equipment and environment guide expression. Tech level does not imply an inability to speak.
+
+Profiles update automatically in the background. Colonists, prisoners, slaves, player-owned animals/mechs and optionally hosted guests persist. Others have temporary context and a readable transcript. Player annotations remain separate from generated personality: individual instructions override colony instructions, both guide expression, and neither rewrites verified game facts.
+
+## Memory
+
+The LLM scores memories continuously between 0 and 1 with a reason. At 0, a scored memory is discarded; at 1, it never automatically expires or downgrades. Scores below 1 use a configurable curve:
+
+`lifetimeDays = scaleDays * (importance / (1 - importance)) ^ exponent`
+
+Defaults: scale 30, exponent 1.4, so 0.1 lasts roughly 1.4 days and 0.5 lasts 30 days. Relationships and context influence scoring, without an Intellectual modifier. Revisited significance may increase. Events waiting for a score are preserved during provider outages. Each prompt uses a bounded memory selection rather than the entire transcript.
+
+Complete transcripts are the default. Pawn and colony retention limits are independently configurable in game days. Shared entries are deleted only once both views have expired them. Memory expiry and transcript deletion are independent.
+
+## AI and setup
+
+OpenAI first, extensible providers and local models. First build implements OpenAI Responses, OpenAI-compatible chat, Claude Messages and Gemini generateContent. No provider SDK is bundled. One model handles everything by default; a separate memory connection is optional. Low reasoning where the protocol/model supports it. API credentials are per server and Windows user, encrypted separately from saves. Guided setup includes official help, endpoint/model entry, a connection test and preferences. Consumer account login is not implemented.
+
+## Architecture
+
+- `Core/`: game-independent models, memory/transcript rules, prompt contract, HTTP request/response adapters and rate budget.
+- `Context`: snapshots game objects only on the game thread; workers receive serialized data.
+- `Integration`: narrowly scoped Harmony observers and a checked, reflection-based bubble adapter. Suppression is at `Bubbler.Add`, never at the game's social event or log creation.
+- `SYMGame`: save-scoped scheduling, lifecycle cancellation, stale reply checks, transcripts and asynchronous memory work.
+- `Settings`, `History`, `Credentials`: player controls, history/annotations and local key store.
+
+## Remaining work / honest limitations
+
+- Live in-game validation and performance measurement at large colony sizes.
+- Live OpenAI/local/provider acceptance and quality testing; credentials were not available during initial development.
+- Original bubble backend verification on 1.7; only Expanded's installed interface is verified.
+- More complete event adapters: recovery/health transitions, witnessed combat aftermath, non-letter environmental developments, precise facilities for mod-added needs.
+- Better semantic memory retrieval/compaction for very long campaigns; current selection is bounded by importance/recency, and complete transcripts increase save size.
+- Animal/species response validation currently relies on prompt instructions and input data, not a formal language classifier.
+- Arbitrary creative rules are instructions to the model, not a mathematical guarantee. Invalid length/JSON/participants are rejected; custom-rule fallback caches are invalidated when rules change. Deterministic suffix transformations are not yet implemented.
+- Provider model discovery, curated fast-model recommendations and more provider-specific reasoning controls.
+- Login/OAuth only if a provider explicitly permits the relevant integration; no assumption that consumer subscriptions provide API access.
+- UI localization; initial UI is English, output language is configurable.
+- Non-Windows credential storage, Steam Workshop metadata/preview and release workflow.
+- Competing dialogue producers require explicit compatibility work; there is no universal no-conflict claim.
+
+## Source references checked during implementation
+
+- [OpenAI text generation](https://developers.openai.com/api/docs/guides/text)
+- [OpenAI reasoning](https://developers.openai.com/api/docs/guides/reasoning)
+- [Claude Messages](https://platform.claude.com/docs/en/api/messages)
+- [Gemini text generation](https://aistudio.google.com/docs/text-generation)
+- [Ollama compatibility](https://docs.ollama.com/api/openai-compatibility)
+- Installed RimWorld 1.7.5005 assemblies, mod metadata guide, Harmony 1.7 and Interaction Bubbles Expanded 1.7 assembly interfaces.

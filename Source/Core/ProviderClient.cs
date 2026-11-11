@@ -1,0 +1,129 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Net;
+using System.Net.Http;
+using System.Net.Http.Headers;
+using System.Text;
+using System.Text.Json;
+using System.Threading;
+using System.Threading.Tasks;
+
+namespace SpeakYourMind.Core;
+
+public sealed class ProviderClient : IDisposable
+{
+    private readonly HttpClient http;
+    public ProviderClient(HttpMessageHandler? handler = null)
+    {
+        http = new HttpClient(handler ?? new HttpClientHandler { AllowAutoRedirect = false });
+        http.Timeout = TimeSpan.FromSeconds(45);
+        http.MaxResponseContentBufferSize = 256 * 1024;
+    }
+    public static Uri ValidateEndpoint(string url)
+    {
+        if (!Uri.TryCreate(url.TrimEnd('/') + "/", UriKind.Absolute, out var uri) ||
+            (uri.Scheme != "https" && !(uri.Scheme == "http" && uri.IsLoopback)) ||
+            uri.UserInfo.Length > 0 || uri.Query.Length > 0 || uri.Fragment.Length > 0)
+            throw new ArgumentException("Use an HTTPS server address, or HTTP localhost for a local model. Do not put credentials in the address.");
+        return uri;
+    }
+    public static HttpRequestMessage BuildRequest(Connection c, string key, string system, string context)
+    {
+        var root = ValidateEndpoint(c.BaseUrl);
+        if (key.Any(char.IsControl)) throw new ArgumentException("The API key contains a line break or control character. Paste only the key itself.");
+        if (string.IsNullOrWhiteSpace(c.Model)) throw new ArgumentException("Choose a model first.");
+        if (string.IsNullOrWhiteSpace(key) && !root.IsLoopback) throw new ArgumentException("Add the API key for this server first.");
+        var body = new Dictionary<string, object>();
+        string path;
+        switch (c.Provider)
+        {
+            case ProviderKind.OpenAI:
+                path = "responses";
+                body["model"] = c.Model; body["instructions"] = system; body["input"] = context;
+                body["store"] = false; body["max_output_tokens"] = 2200;
+                if (c.SendReasoning && c.Reasoning != "provider default") body["reasoning"] = new { effort = c.Reasoning };
+                body["text"] = new { format = new { type = "json_object" } };
+                break;
+            case ProviderKind.Claude:
+                path = "messages";
+                body["model"] = c.Model; body["system"] = system; body["max_tokens"] = 1800;
+                body["messages"] = new[] { new { role = "user", content = context } };
+                break;
+            case ProviderKind.Gemini:
+                path = "models/" + Uri.EscapeDataString(c.Model) + ":generateContent";
+                body["systemInstruction"] = new { parts = new[] { new { text = system } } };
+                body["contents"] = new[] { new { role = "user", parts = new[] { new { text = context } } } };
+                body["generationConfig"] = new { maxOutputTokens = 2200, responseMimeType = "application/json" };
+                break;
+            default:
+                path = "chat/completions";
+                body["model"] = c.Model;
+                body["messages"] = new[] { new { role = "system", content = system }, new { role = "user", content = context } };
+                body["max_tokens"] = 1800; body["stream"] = false;
+                if (c.SendReasoning && c.Reasoning != "provider default") body["reasoning_effort"] = c.Reasoning;
+                break;
+        }
+        var request = new HttpRequestMessage(HttpMethod.Post, new Uri(root, path))
+        { Content = new StringContent(SYMJson.Write(body), Encoding.UTF8, "application/json") };
+        if (c.Provider == ProviderKind.Claude)
+        {
+            request.Headers.Add("x-api-key", key);
+            request.Headers.Add("anthropic-version", "2023-06-01");
+        }
+        else if (c.Provider == ProviderKind.Gemini) request.Headers.Add("x-goog-api-key", key);
+        else if (!string.IsNullOrWhiteSpace(key)) request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", key.Trim());
+        return request;
+    }
+    public async Task<string> Generate(Connection c, string key, string system, string context, CancellationToken token)
+    {
+        using var request = BuildRequest(c, key, system, context);
+        using var response = await http.SendAsync(request, token).ConfigureAwait(false);
+        if (!response.IsSuccessStatusCode) throw new ProviderException(FriendlyError(response.StatusCode));
+        var content = await response.Content.ReadAsStringAsync(token).ConfigureAwait(false);
+        return Extract(c.Provider, content);
+    }
+    public static string Extract(ProviderKind provider, string content)
+    {
+        using var doc = JsonDocument.Parse(content);
+        var root = doc.RootElement;
+        try
+        {
+            switch (provider)
+            {
+                case ProviderKind.OpenAI:
+                    if (root.TryGetProperty("status", out var status) && status.GetString() != "completed") throw new FormatException("Incomplete response. Increase the output allowance or lower reasoning.");
+                    return string.Join("", root.GetProperty("output").EnumerateArray()
+                        .Where(x => x.TryGetProperty("type", out var type) && type.GetString() == "message")
+                        .SelectMany(x => x.GetProperty("content").EnumerateArray())
+                        .Where(x => x.GetProperty("type").GetString() == "output_text").Select(x => x.GetProperty("text").GetString()));
+                case ProviderKind.Claude:
+                    if (root.TryGetProperty("stop_reason", out var stop) && stop.GetString() == "max_tokens") throw new FormatException("Response exceeded the output allowance.");
+                    return string.Join("", root.GetProperty("content").EnumerateArray().Where(x => x.GetProperty("type").GetString() == "text").Select(x => x.GetProperty("text").GetString()));
+                case ProviderKind.Gemini:
+                    var candidate = root.GetProperty("candidates")[0];
+                    if (candidate.TryGetProperty("finishReason", out var finish) && finish.GetString() != "STOP") throw new FormatException("The provider did not return a complete response.");
+                    return string.Join("", candidate.GetProperty("content").GetProperty("parts").EnumerateArray().Where(x => !x.TryGetProperty("thought", out var thought) || !thought.GetBoolean()).Select(x => x.TryGetProperty("text", out var text) ? text.GetString() : ""));
+                default:
+                    var choice = root.GetProperty("choices")[0];
+                    if (choice.TryGetProperty("finish_reason", out var reason) && reason.GetString() == "length") throw new FormatException("Response exceeded the output allowance.");
+                    return choice.GetProperty("message").GetProperty("content").GetString() ?? throw new FormatException("Empty response.");
+            }
+        }
+        catch (Exception e) when (e is KeyNotFoundException || e is InvalidOperationException || e is IndexOutOfRangeException)
+        { throw new FormatException("The service returned an unsupported response. Check the provider type and model."); }
+    }
+    public static string FriendlyError(HttpStatusCode code) => (int)code switch
+    {
+        401 or 403 => "The service rejected the credentials or model access. Check your API key and account permissions.",
+        404 => "The model or address was not found. Check the server address and exact model name.",
+        429 => "The service reached a usage or rate limit. Check your account allowance; generation will back off.",
+        400 or 422 => "The model rejected a setting. Try disabling reasoning controls and check the provider type.",
+        >= 500 => "The AI service is temporarily unavailable. Generation will back off.",
+        _ => "The service could not complete the request (HTTP " + (int)code + ")."
+    };
+    public static string SafeError(Exception e) => e is ProviderException || e is ArgumentException || e is FormatException ? e.Message :
+        e is OperationCanceledException ? "The request timed out or was cancelled." : "Could not connect. Check the network or start your local model server.";
+    public void Dispose() => http.Dispose();
+}
+public sealed class ProviderException : Exception { public ProviderException(string message) : base(message) { } }
