@@ -1,5 +1,11 @@
 # Changes
 
+## Unreleased — optional bubble history shortcut
+
+- Added **Open dialogue history when clicking speech bubbles** to mod settings, off by default for new and existing settings. With Expanded, enabling it opens the clicked pawn's history; disabling it suppresses navigation for SpeakYourMind bubbles without sending their synthetic entries to the native log viewer.
+- The existing **Voices** bottom-menu tab remains the main entry point for transcripts, memories and instructions.
+- In-game toggle and persistence checks remain pending; see `PLAYTEST.md`.
+
 ## 0.3.3 — explicit JSON input and visible setup numbers
 
 - OpenAI requests now explicitly request JSON in the input as well as the separate instructions field. This addresses the JSON-mode input guard that can reject requests whose actual input lacks the word JSON; it applies to previews, dialogue and memory work.

@@ -99,7 +99,11 @@ public static class Integration
     private static bool NavigationPrefix(Pawn __0, LogEntry __1)
     {
         if (__1 is not ExpressionEntry) return true;
-        Find.WindowStack.Add(new HistoryWindow(__0.ThingID)); return false;
+        if (SYMMod.Instance.Settings.Preferences.ClickBubblesOpenHistory)
+            Find.WindowStack.Add(new HistoryWindow(__0.ThingID));
+        // Our presentation-only entries must never reach vanilla log navigation,
+        // including when clicking to open history is disabled.
+        return false;
     }
     private static void Observe(Action<SYMGame> action)
     {

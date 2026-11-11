@@ -28,6 +28,7 @@ public enum ProviderKind { OpenAI, Compatible, Claude, Gemini }
 public sealed class Preferences
 {
     public bool Enabled;
+    public bool ClickBubblesOpenHistory = false;
     public ExpressionStyle Style = ExpressionStyle.Hybrid;
     public ExpressionLength Length = ExpressionLength.Standard;
     public int Activity = 3, MaxCharacters = 0, MaxBubbles = 3, MaxTurns = 3, RequestsPerMinute = 12;

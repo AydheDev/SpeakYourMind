@@ -20,6 +20,8 @@ Version **0.3.3 — OpenAI JSON input fix**, compiled against installed **1.7.50
 8. Continue, then choose **Save and enable SpeakYourMind**. Cancelling setup preserves your current connection; changes to the model, key, or request settings require another successful test before saving.
 9. Default preferences are **Hybrid**, **Standard**, and **Lively (3/4)**. The character override starts at zero, using the length preset: Brief 100, Standard 240, Descriptive 420. You can enter an exact override from 1 to 2,000 visible characters, including punctuation and annotation additions.
 
+Open **Voices** in RimWorld's bottom menu to browse dialogue history, memories and player instructions. Clicking a SpeakYourMind speech bubble does not open history by default, including when upgrading existing settings. To enable the shortcut with Expanded, turn on **Open dialogue history when clicking speech bubbles** in **Options → Mod settings → SpeakYourMind**. Turning it off leaves the Voices tab available.
+
 If upgrading from 0.1.0 or 0.2.0, replace the installed SpeakYourMind folder while the game is closed. Existing history and player instructions use the same save format. Existing explicit character overrides remain unchanged; set the override to zero to follow length presets.
 
 ### Local model setup

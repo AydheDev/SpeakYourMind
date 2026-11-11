@@ -54,6 +54,8 @@ public sealed class SYMMod : Mod
         l.Label("Bubble integration: " + Integration.Status);
         if (l.ButtonText("Guided AI setup")) Find.WindowStack.Add(new SetupWindow(Settings.Connection));
         l.CheckboxLabeled("Enable contextual expressions", ref s.Enabled);
+        l.CheckboxLabeled("Open dialogue history when clicking speech bubbles", ref s.ClickBubblesOpenHistory);
+        l.Label("Open transcripts, memories and instructions from the Voices tab in the bottom menu. Bubble clicks are optional and off by default.");
         l.Label("Connection: " + Settings.Connection.Provider + " / " + Settings.Connection.Model);
         l.Label("Status: " + (SYMGame.Current?.Status ?? "Load a colony to begin."));
         if (SYMGame.Current is { } game)
