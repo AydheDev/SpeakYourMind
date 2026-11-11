@@ -38,7 +38,10 @@ public sealed class ProviderClient : IDisposable
         {
             case ProviderKind.OpenAI:
                 path = "responses";
-                body["model"] = c.Model.Trim(); body["instructions"] = system; body["input"] = context;
+                body["model"] = c.Model.Trim(); body["instructions"] = system;
+                // JSON-mode validation must see an explicit JSON instruction in input,
+                // even when our separate instructions already specify the response shape.
+                body["input"] = "Return only a JSON object matching the supplied instructions.\nThe following is context data:\n" + context;
                 body["store"] = false; body["max_output_tokens"] = outputTokens;
                 if (c.SendReasoning && c.Reasoning != "provider default") body["reasoning"] = new { effort = c.Reasoning };
                 body["text"] = new { format = new { type = "json_object" } };
@@ -172,7 +175,9 @@ public sealed class ProviderClient : IDisposable
                         "max_output_tokens" or "max_tokens" or "max_completion_tokens" => "output allowance",
                         "model" => "model name",
                         "store" => "response storage",
-                        "input" or "instructions" or "messages" => "prompt content",
+                        "input" => "prompt content (input)",
+                        "instructions" => "prompt content (instructions)",
+                        "messages" => "prompt content (messages)",
                         _ => ""
                     };
                     errorCode = Read("code") switch

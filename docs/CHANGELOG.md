@@ -1,5 +1,12 @@
 # Changes
 
+## 0.3.3 — explicit JSON input and visible setup numbers
+
+- OpenAI requests now explicitly request JSON in the input as well as the separate instructions field. This addresses the JSON-mode input guard that can reject requests whose actual input lacks the word JSON; it applies to previews, dialogue and memory work.
+- Initialize timeout and output-allowance text boxes from the actual connection values, including after switching provider presets.
+- Prompt errors now distinguish the recognized `input`, `instructions` and `messages` fields without exposing raw provider messages.
+- A mocked JSON-mode guard rejects the previous preview shape and accepts the corrected dialogue and memory requests. All 328 automated assertions pass. The screenshot's HTTP 400 prompt-content rejection is consistent with this cause, but successful live acceptance still needs a connection retest.
+
 ## 0.3.2 — identify rejected request settings
 
 - Connection tests, generation and model discovery now show the HTTP status and recognized error fields/codes returned by the provider. Rejections of output format, reasoning, token allowance and model name can be distinguished.

@@ -1,7 +1,8 @@
-# 0.3.2 development validation — 11 November 2026
+# 0.3.3 development validation — 11 November 2026
 
 - Compiled successfully with no compiler warnings against local RimWorld **1.7.5005 rev1082**, .NET 10, and Harmony 1.7.
-- **319 automated assertions passed**: continuous memory retention, permanent core memories, independent transcript retention, annotation persistence, validated save round trips, corrupt/future-save rejection, Unicode character limits, duplicate suppression, provider payloads and parsing, credential-safe errors, request budgets, mocked HTTP handling, and game hook signatures.
+- **328 automated assertions passed**: continuous memory retention, permanent core memories, independent transcript retention, annotation persistence, validated save round trips, corrupt/future-save rejection, Unicode character limits, duplicate suppression, provider payloads and parsing, credential-safe errors, request budgets, mocked HTTP handling, and game hook signatures.
+- A mocked JSON-mode input guard rejects the old preview payload and accepts corrected dialogue and memory requests. This checks the documented guard condition, input preservation, low reasoning and token/privacy settings; it does not prove successful live API acceptance.
 - Exchange regression checks cover sequential turns, exactly-once recording at successful draw, pause/resume, staggered release, unseen expiry, cancellation, and late responses after fallback.
 - Setup checks cover draft isolation, successful-test requirements, and invalidation after key, model or request-setting changes. Mocked tests exercise every provider through response parsing, display lifecycle, transcript recording and save restoration; model listing and server retry delays are also checked.
 - History query checks use **100,000 transcript entries**. Repeated unchanged redraw queries reuse the existing result list; participant/category filters, pagination, search, appends and retention expiry are covered. This measures the data/query behavior, not the running game's frame rate.

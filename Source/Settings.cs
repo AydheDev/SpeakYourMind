@@ -145,13 +145,20 @@ public sealed class SetupWindow : Window
     public SetupWindow(Connection c, bool memory = false)
     {
         target = c; draft = new ConnectionDraft(c) { Key = Credentials.Read(c) }; this.memory = memory;
+        RefreshNumberFields();
         doCloseX = true; forcePause = true; absorbInputAroundWindow = true;
+    }
+    private void RefreshNumberFields()
+    {
+        timeoutBuffer = connection.TimeoutSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        tokenBuffer = connection.OutputTokens.ToString(System.Globalization.CultureInfo.InvariantCulture);
     }
     private void Preset(string name, ProviderKind provider, string url)
     {
         connection.Provider = provider; connection.BaseUrl = url; connection.Model = "";
         connection.SendReasoning = provider == ProviderKind.OpenAI; connection.Reasoning = "low";
         connection.TimeoutSeconds = url.Contains("localhost") ? 90 : 45;
+        RefreshNumberFields();
         draft.Key = Credentials.Read(connection); notice = ""; keyNotice = ""; testSample = ""; step = 1; scroll = Vector2.zero;
     }
     public override void DoWindowContents(Rect rect)
@@ -311,7 +318,7 @@ public static class Diagnostics
         var c = SYMMod.Instance.Settings.Connection;
         var g = SYMGame.Current;
         // Deliberately exclude keys, endpoint addresses, prompts, annotations, names and transcript text.
-        return "SpeakYourMind 0.3.2\nRuntime: " + Environment.Version + "\nBubble integration: " + Integration.Status + "\nOptional adapters: " + OptionalDialogue.Status +
+        return "SpeakYourMind 0.3.3\nRuntime: " + Environment.Version + "\nBubble integration: " + Integration.Status + "\nOptional adapters: " + OptionalDialogue.Status +
             "\nProvider: " + c.Provider + "\nGeneration enabled: " + SYMMod.Instance.Settings.Preferences.Enabled +
             "\nRequests: " + (g?.RequestsStarted ?? 0) + "\nDisplayed: " + (g?.ExpressionsShown ?? 0) + "\nFallbacks: " + (g?.FallbacksShown ?? 0) +
             "\nDiscarded: " + (g?.Discarded ?? 0) + "\nQueued: " + (g?.Queued ?? 0) + "\nActive bubbles: " + (g?.ActiveBubbles ?? 0) +
