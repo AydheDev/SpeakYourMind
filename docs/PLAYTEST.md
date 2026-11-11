@@ -1,4 +1,4 @@
-# 0.3.0 home playtest checklist
+# 0.3.1 home playtest checklist
 
 Use a disposable colony first. This checklist is not a record of completed in-game validation.
 

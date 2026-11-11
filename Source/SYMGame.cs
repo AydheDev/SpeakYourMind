@@ -94,7 +94,7 @@ public sealed class SYMGame : GameComponent
         journal = new DebugJournal(DebugFolder, Settings.DebugSessionMegabytes);
         journal.AddSecret(Credentials.Read(SYMMod.Instance.Settings.Connection));
         journal.AddSecret(Credentials.Read(SYMMod.Instance.Settings.MemoryConnection));
-        journal.Record(new DebugEvent { Stage = "session_start", Day = Day, Detail = "SpeakYourMind 0.3.0; prompt revision 2. Loaded mods: " + string.Join(", ", LoadedModManager.RunningModsListForReading.Select(m => m.Name)) });
+        journal.Record(new DebugEvent { Stage = "session_start", Day = Day, Detail = "SpeakYourMind 0.3.1; prompt revision 2. Loaded mods: " + string.Join(", ", LoadedModManager.RunningModsListForReading.Select(m => m.Name)) });
     }
     private void Trace(string stage, Intent? intent = null, string detail = "", string text = "", string response = "", string system = "", string context = "", Connection? connection = null, double elapsed = 0, string request = "", string source = "")
     {

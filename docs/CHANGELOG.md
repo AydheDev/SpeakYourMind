@@ -1,5 +1,10 @@
 # Changes
 
+## 0.3.1 — preserve pasted keys during setup
+
+- Fixed the saved-key button clearing a freshly pasted API key when no saved credential exists or it cannot be decrypted. The current entry is now kept, with an explanation directly below the button.
+- Renamed the button to **Use a previously saved key (optional)** and clarified the first-time flow: paste key, continue, test, then save at the end.
+
 ## 0.3.0 — optional quick replies and playtest logging
 
 - Added opt-in adapters for SpeakUp and its installed Extension/Child/ChildSFW rules, Vanilla Social Interactions Expanded event text, Rumor Has It event text, and the known Callouts display interface. Callouts and Rumor Has It remain experimental on 1.7; their reviewed continued releases list support through 1.6.

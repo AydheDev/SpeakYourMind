@@ -6,7 +6,7 @@ An early-development, display-only RimWorld **1.7** mod. Pawns express their nee
 
 ## Status
 
-Version **0.3.0 — optional dialogue adapters and playtest logging**, compiled against installed **1.7.5005 rev1082** and the installed Expanded 1.7 interface. **303 automated assertions** and **8 bubble interface checks** pass. **Not yet verified in a running colony or against a live AI service.** The original Interaction Bubbles integration is experimental and interface-checked at startup; it is not certified for 1.7. This is not a finished Workshop release. Changes are listed in [docs/CHANGELOG.md](docs/CHANGELOG.md).
+Version **0.3.1 — optional dialogue adapters and playtest logging**, compiled against installed **1.7.5005 rev1082** and the installed Expanded 1.7 interface. **303 automated assertions** and **8 bubble interface checks** pass. **Not yet verified in a running colony or against a live AI service.** The original Interaction Bubbles integration is experimental and interface-checked at startup; it is not certified for 1.7. This is not a finished Workshop release. Changes are listed in [docs/CHANGELOG.md](docs/CHANGELOG.md).
 
 ## Install and set up
 

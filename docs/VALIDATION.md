@@ -1,4 +1,4 @@
-# 0.3.0 development validation — 11 November 2026
+# 0.3.1 development validation — 11 November 2026
 
 - Compiled successfully with no compiler warnings against local RimWorld **1.7.5005 rev1082**, .NET 10, and Harmony 1.7.
 - **303 automated assertions passed**: continuous memory retention, permanent core memories, independent transcript retention, annotation persistence, validated save round trips, corrupt/future-save rejection, Unicode character limits, duplicate suppression, provider payloads and parsing, credential-safe errors, request budgets, mocked HTTP handling, and game hook signatures.

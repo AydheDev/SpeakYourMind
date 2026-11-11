@@ -131,7 +131,7 @@ public sealed class SetupWindow : Window
     private readonly ConnectionDraft draft;
     private Connection connection => draft.Value;
     private readonly bool memory;
-    private string notice = "", testSample = "", testedConnection = "", tokenBuffer = "", timeoutBuffer = "";
+    private string notice = "", keyNotice = "", testSample = "", testedConnection = "", tokenBuffer = "", timeoutBuffer = "";
     private Vector2 scroll;
     private float contentHeight = 600;
     private int step;
@@ -152,7 +152,7 @@ public sealed class SetupWindow : Window
         connection.Provider = provider; connection.BaseUrl = url; connection.Model = "";
         connection.SendReasoning = provider == ProviderKind.OpenAI; connection.Reasoning = "low";
         connection.TimeoutSeconds = url.Contains("localhost") ? 90 : 45;
-        draft.Key = Credentials.Read(connection); notice = ""; testSample = ""; step = 1; scroll = Vector2.zero;
+        draft.Key = Credentials.Read(connection); notice = ""; keyNotice = ""; testSample = ""; step = 1; scroll = Vector2.zero;
     }
     public override void DoWindowContents(Rect rect)
     {
@@ -198,10 +198,18 @@ public sealed class SetupWindow : Window
         {
             l.Label("Connect " + connection.Provider + ". Use an API credential from the provider's developer dashboard. A chat-app account alone does not establish API access. This build uses API keys; account login is not implemented.");
             string address = l.TextEntryLabeled("Server address", connection.BaseUrl);
-            if (address != connection.BaseUrl) { connection.BaseUrl = address; draft.Key = ""; }
+            if (address != connection.BaseUrl) { connection.BaseUrl = address; draft.Key = ""; keyNotice = ""; }
             l.Label("API key (stored encrypted for this Windows account; never included in saves)");
-            draft.Key = GUI.PasswordField(l.GetRect(32), draft.Key, '*');
-            if (l.ButtonText("Load saved key for this server")) draft.Key = Credentials.Read(connection);
+            string enteredKey = GUI.PasswordField(l.GetRect(32), draft.Key, '*');
+            if (enteredKey != draft.Key) { draft.Key = enteredKey; keyNotice = ""; }
+            l.Label("First-time setup: paste your API key above, then choose Continue to model selection. Your key is saved only after a successful test and the final Save step.");
+            if (l.ButtonText("Use a previously saved key (optional)"))
+            {
+                string savedKey = Credentials.Read(connection);
+                if (string.IsNullOrWhiteSpace(savedKey)) keyNotice = "No saved key could be loaded for this server. Your current entry has been kept. Paste your key if the box is empty, then continue below.";
+                else { draft.Key = savedKey; keyNotice = "Previously saved key loaded. Continue to model selection to test the connection."; }
+            }
+            if (keyNotice.Length > 0) l.Label(keyNotice);
             l.Label("For a local model: install Ollama or LM Studio, download a model suitable for your hardware, start its local API server, then copy its exact model name below. A localhost server may not require a key.");
             if (l.ButtonText("Open official setup instructions")) Application.OpenURL(connection.Provider switch
             {
@@ -303,7 +311,7 @@ public static class Diagnostics
         var c = SYMMod.Instance.Settings.Connection;
         var g = SYMGame.Current;
         // Deliberately exclude keys, endpoint addresses, prompts, annotations, names and transcript text.
-        return "SpeakYourMind 0.3.0\nRuntime: " + Environment.Version + "\nBubble integration: " + Integration.Status + "\nOptional adapters: " + OptionalDialogue.Status +
+        return "SpeakYourMind 0.3.1\nRuntime: " + Environment.Version + "\nBubble integration: " + Integration.Status + "\nOptional adapters: " + OptionalDialogue.Status +
             "\nProvider: " + c.Provider + "\nGeneration enabled: " + SYMMod.Instance.Settings.Preferences.Enabled +
             "\nRequests: " + (g?.RequestsStarted ?? 0) + "\nDisplayed: " + (g?.ExpressionsShown ?? 0) + "\nFallbacks: " + (g?.FallbacksShown ?? 0) +
             "\nDiscarded: " + (g?.Discarded ?? 0) + "\nQueued: " + (g?.Queued ?? 0) + "\nActive bubbles: " + (g?.ActiveBubbles ?? 0) +
