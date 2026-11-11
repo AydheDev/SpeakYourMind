@@ -6,7 +6,7 @@ An early-development, display-only RimWorld **1.7** mod. Pawns express their nee
 
 ## Status
 
-Version **0.3.1 — optional dialogue adapters and playtest logging**, compiled against installed **1.7.5005 rev1082** and the installed Expanded 1.7 interface. **303 automated assertions** and **8 bubble interface checks** pass. **Not yet verified in a running colony or against a live AI service.** The original Interaction Bubbles integration is experimental and interface-checked at startup; it is not certified for 1.7. This is not a finished Workshop release. Changes are listed in [docs/CHANGELOG.md](docs/CHANGELOG.md).
+Version **0.3.2 — clearer connection errors**, compiled against installed **1.7.5005 rev1082** and the installed Expanded 1.7 interface. **319 automated assertions** and **8 bubble interface checks** pass. **Not yet verified in a running colony or against a live AI service.** The original Interaction Bubbles integration is experimental and interface-checked at startup; it is not certified for 1.7. This is not a finished Workshop release. Changes are listed in [docs/CHANGELOG.md](docs/CHANGELOG.md).
 
 ## Install and set up
 
@@ -53,6 +53,7 @@ Official guides: [OpenAI](https://developers.openai.com/api/docs/quickstart), [C
 - Resume the game and keep a pawn on screen. Completed replies wait during pause, and stale/off-screen requests are discarded.
 - Read **Status** and **Memory** separately. A memory problem does not prevent otherwise working expressions. **Retry connection now** clears pending requests and the retry delay without erasing history.
 - For a timeout, raise **Request timeout** in guided setup. For incomplete output, increase **Output allowance** or lower reasoning. Retest before saving.
+- For a rejected request, note the **Reported field**, **Server code** and **HTTP** status in the error. These identify recognized provider error metadata without exposing the raw response or credentials. Do not assume every rejection concerns reasoning. For GPT-6.1 Sol, the model ID is `gpt-6.1-sol` and `low` is a supported reasoning effort ([official model documentation](https://developers.openai.com/api/docs/models/gpt-6.1-sol)); the cause of the first reported live rejection is still being investigated.
 - If a short hard limit or a strict creative rule rejects a response, the bubble may clear. The mod does not fall back to text that ignores player instructions.
 
 ## Optional quick replies and follow-ups

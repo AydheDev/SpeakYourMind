@@ -23,6 +23,7 @@ public static class Suite
         Memories(); History(); PromptsAndText(); Providers(); Serialization(); Budget(); ReflectionContracts();
         Transport().GetAwaiter().GetResult();
         PolishTests.Run();
+        ProviderErrorTests.Run().GetAwaiter().GetResult();
         OptionalDialogueTests.Run();
         return "PASS: " + assertions + " assertions (memory, history, provider requests/responses, mocked transport, budget, serialization, installed 1.7 integration contracts).";
     }

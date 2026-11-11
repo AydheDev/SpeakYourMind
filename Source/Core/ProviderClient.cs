@@ -92,7 +92,8 @@ public sealed class ProviderClient : IDisposable
         if (!response.IsSuccessStatusCode)
         {
             double retryAfter = response.Headers.RetryAfter?.Delta?.TotalSeconds ?? (response.Headers.RetryAfter?.Date - DateTimeOffset.UtcNow)?.TotalSeconds ?? 0;
-            throw new ProviderException(FriendlyError(response.StatusCode), Math.Clamp(retryAfter, 0, 600));
+            string error = await response.Content.ReadAsStringAsync(timeout.Token).ConfigureAwait(false);
+            throw new ProviderException(FriendlyError(response.StatusCode, error), Math.Clamp(retryAfter, 0, 600));
         }
         var content = await response.Content.ReadAsStringAsync(token).ConfigureAwait(false);
         return Extract(c.Provider, content);
@@ -137,7 +138,8 @@ public sealed class ProviderClient : IDisposable
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
         timeout.CancelAfter(TimeSpan.FromSeconds(15));
         using var response = await http.SendAsync(request, timeout.Token).ConfigureAwait(false);
-        if (!response.IsSuccessStatusCode) throw new ProviderException(FriendlyError(response.StatusCode));
+        if (!response.IsSuccessStatusCode)
+            throw new ProviderException(FriendlyError(response.StatusCode, await response.Content.ReadAsStringAsync(timeout.Token).ConfigureAwait(false)));
         return ExtractModels(await response.Content.ReadAsStringAsync(timeout.Token).ConfigureAwait(false));
     }
     public static List<string> ExtractModels(string json)
@@ -148,14 +150,60 @@ public sealed class ProviderClient : IDisposable
             .Select(m => m.GetProperty("id").GetString()!).Where(id => !string.IsNullOrWhiteSpace(id) && id.Length <= 200)
             .Distinct().OrderBy(id => id, StringComparer.OrdinalIgnoreCase).Take(500).ToList();
     }
-    public static string FriendlyError(HttpStatusCode code) => (int)code switch
+    public static string FriendlyError(HttpStatusCode code, string? body = null)
+    {
+        string summary = ErrorSummary(code);
+        // Providers may echo credentials, account details or prompts in any field. Only
+        // return recognized protocol identifiers; never display or log the raw body.
+        string parameter = "", errorCode = "";
+        if (!string.IsNullOrEmpty(body) && body.Length <= 16384)
+        {
+            try
+            {
+                using var document = JsonDocument.Parse(body, new JsonDocumentOptions { MaxDepth = 16 });
+                var root = document.RootElement;
+                if (root.ValueKind == JsonValueKind.Object && root.TryGetProperty("error", out var error) && error.ValueKind == JsonValueKind.Object)
+                {
+                    string Read(string name) => error.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString()! : "";
+                    parameter = Read("param") switch
+                    {
+                        "reasoning" or "reasoning.effort" or "reasoning_effort" => "reasoning level",
+                        "text" or "text.format" or "text.format.type" or "response_format" or "response_format.type" => "output format",
+                        "max_output_tokens" or "max_tokens" or "max_completion_tokens" => "output allowance",
+                        "model" => "model name",
+                        "store" => "response storage",
+                        "input" or "instructions" or "messages" => "prompt content",
+                        _ => ""
+                    };
+                    errorCode = Read("code") switch
+                    {
+                        "unsupported_parameter" => "unsupported_parameter",
+                        "unsupported_value" => "unsupported_value",
+                        "invalid_value" => "invalid_value",
+                        "invalid_json_schema" => "invalid_json_schema",
+                        "invalid_request_error" => "invalid_request_error",
+                        "model_not_found" => "model_not_found",
+                        "insufficient_quota" => "insufficient_quota",
+                        "rate_limit_exceeded" => "rate_limit_exceeded",
+                        "context_length_exceeded" => "context_length_exceeded",
+                        _ => ""
+                    };
+                }
+            }
+            catch (JsonException) { }
+        }
+        if (parameter.Length > 0) summary += " Reported field: " + parameter + ".";
+        if (errorCode.Length > 0) summary += " Server code: " + errorCode + ".";
+        return summary + " (HTTP " + (int)code + ")";
+    }
+    private static string ErrorSummary(HttpStatusCode code) => (int)code switch
     {
         401 or 403 => "The service rejected the credentials or model access. Check your API key and account permissions.",
         404 => "The model or address was not found. Check the server address and exact model name.",
         429 => "The service reached a usage or rate limit. Check your account allowance; generation will back off.",
-        400 or 422 => "The model rejected a setting. Try disabling reasoning controls and check the provider type.",
+        400 or 422 => "The server rejected the request. Check the reported field and provider type.",
         >= 500 => "The AI service is temporarily unavailable. Generation will back off.",
-        _ => "The service could not complete the request (HTTP " + (int)code + ")."
+        _ => "The service could not complete the request."
     };
     public static string SafeError(Exception e) => e is ProviderException || e is ArgumentException || e is FormatException ? e.Message :
         e is JsonException ? "The model returned malformed JSON. Try another model or increase its output allowance." :

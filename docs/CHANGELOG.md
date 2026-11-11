@@ -1,5 +1,11 @@
 # Changes
 
+## 0.3.2 — identify rejected request settings
+
+- Connection tests, generation and model discovery now show the HTTP status and recognized error fields/codes returned by the provider. Rejections of output format, reasoning, token allowance and model name can be distinguished.
+- Removed the blanket instruction to disable reasoning for every rejected request. The server's raw message and unknown metadata remain private, since they may echo API keys, account data or prompt content.
+- Added mocked regressions for error parsing, malformed replies, credential-safe output and preserved retry delays. Automated total: 319 assertions. This improves diagnosis; it does not establish the cause of the reported live GPT-6.1 Sol rejection.
+
 ## 0.3.1 — preserve pasted keys during setup
 
 - Fixed the saved-key button clearing a freshly pasted API key when no saved credential exists or it cannot be decrypted. The current entry is now kept, with an explanation directly below the button.
