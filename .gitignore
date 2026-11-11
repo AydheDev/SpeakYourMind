@@ -7,5 +7,5 @@ artifacts/
 *.dll
 *.pdb
 *.zip
-credentials*
+/credentials*
 .env*
