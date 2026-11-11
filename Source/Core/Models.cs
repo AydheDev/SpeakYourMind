@@ -29,6 +29,7 @@ public sealed class Preferences
 {
     public bool Enabled;
     public bool ClickBubblesOpenHistory = false;
+    public bool NativeSocialWhenUnavailable = true;
     public ExpressionStyle Style = ExpressionStyle.Hybrid;
     public ExpressionLength Length = ExpressionLength.Standard;
     public int Activity = 3, MaxCharacters = 0, MaxBubbles = 3, MaxTurns = 3, RequestsPerMinute = 12;
@@ -89,6 +90,8 @@ public sealed class PawnSnapshot
 public sealed class Memory
 {
     public string Id = Guid.NewGuid().ToString("N"), Fact = "", Source = "game", Perspective = "experienced", Reason = "";
+    public string Topic = "";
+    public List<string> SubjectIds = new();
     public double Day;
     public float Importance = 0.1f;
     public bool Scored;
@@ -194,10 +197,14 @@ public static class ProfilePolicy
 public sealed class RequestBudget
 {
     private readonly Queue<double> starts = new();
-    public bool TrySpend(double now, int limit)
+    public bool Available(double now, int limit)
     {
         while (starts.Count > 0 && starts.Peek() <= now - 60) starts.Dequeue();
-        if (starts.Count >= Math.Max(1, limit)) return false;
+        return starts.Count < Math.Max(1, limit);
+    }
+    public bool TrySpend(double now, int limit)
+    {
+        if (!Available(now, limit)) return false;
         starts.Enqueue(now); return true;
     }
 }

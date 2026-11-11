@@ -1,3 +1,12 @@
+# 0.4.0 workspace validation — 11 November 2026
+
+- **355 core assertions passed** using the standalone .NET 10 runner, including previous non-game tests and new timing, topic novelty, bounded relevant memory retrieval, legacy-save defaults, grouped/searchable exchanges, token parsing and concurrent metrics checks.
+- **9 installer transaction checks passed** in PowerShell 7.6 on Linux with temporary fixture directories: replacement, backups, rejected staged hashes, unrelated-target refusal, rollback after an injected verification failure and first install.
+- All repository C# files and PowerShell scripts are syntax-checked separately.
+- **Not run for 0.4.0:** full runtime compilation against RimWorld/Harmony, Windows Steam discovery, installation on the user's PC, live provider requests, or in-game UI/scheduling/adapter checks. The installer will require the full game-dependent tests and Expanded interface checks before installation. Pure core/transaction tests are not evidence of those checks passing.
+
+The following is the historical validation record for the previous build, not a claim about 0.4.0:
+
 # 0.3.3 development validation — 11 November 2026
 
 - Compiled successfully with no compiler warnings against local RimWorld **1.7.5005 rev1082**, .NET 10, and Harmony 1.7.

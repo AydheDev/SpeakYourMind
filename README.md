@@ -6,11 +6,11 @@ An early-development, display-only RimWorld **1.7** mod. Pawns express their nee
 
 ## Status
 
-Version **0.3.3 — OpenAI JSON input fix**, compiled against installed **1.7.5005 rev1082** and the installed Expanded 1.7 interface. **328 automated assertions** and **8 bubble interface checks** pass. **Not yet verified in a running colony or against a live AI service.** The original Interaction Bubbles integration is experimental and interface-checked at startup; it is not certified for 1.7. This is not a finished Workshop release. Changes are listed in [docs/CHANGELOG.md](docs/CHANGELOG.md).
+Version **0.4.0 — conversation reliability and usability**, prepared as a source update for RimWorld **1.7**. **355 core assertions** and **9 installer transaction checks** pass in the development workspace. The complete mod has **not yet been compiled against the game or playtested** at this version. The previous 0.3.3 build targeted **1.7.5005 rev1082**. The Windows installer runs the full game-dependent tests, verifies the Expanded interface, builds and packages before replacing the installed mod. This is not a finished Workshop release. Changes are listed in [docs/CHANGELOG.md](docs/CHANGELOG.md).
 
 ## Install and set up
 
-1. Extract the `SpeakYourMind` folder from the package into RimWorld's `Mods` folder.
+1. For a compiled package, extract the `SpeakYourMind` folder into RimWorld's `Mods` folder. For this source update, use the Windows installer described below.
 2. Enable **Harmony**, **Interaction Bubbles Expanded**, then **SpeakYourMind**. Do not enable the original Interaction Bubbles alongside Expanded.
 3. Restart the game. Open **Options → Mod settings → SpeakYourMind → Guided AI setup**.
 4. Choose OpenAI, Claude, Gemini, a local server, OpenRouter, or another OpenAI-compatible service.
@@ -24,6 +24,25 @@ Open **Voices** in RimWorld's bottom menu to browse dialogue history, memories a
 
 If upgrading from 0.1.0 or 0.2.0, replace the installed SpeakYourMind folder while the game is closed. Existing history and player instructions use the same save format. Existing explicit character overrides remain unchanged; set the override to zero to follow length presets.
 
+### Build and install this source update on Windows
+
+Close RimWorld. Extract or clone this repository **outside** `Mods/SpeakYourMind`, open PowerShell 7.6+ in its folder, and run:
+
+```powershell
+pwsh -NoProfile -File .\install.ps1
+```
+
+The installer detects Steam libraries, requires RimWorld 1.7 and the installed Harmony/Expanded assemblies, runs the full tests and interface checks, builds a matching package, then installs it. It backs up an existing SpeakYourMind folder under `RimWorld/ModBackups/SpeakYourMind` and rolls back if the replacement fails verification. It does not modify saves, credentials or enabled-mod settings. If detection is ambiguous, provide `-RimWorldDir`, `-HarmonyDll`, and `-BubblesDll` explicitly. A failed build or test leaves the current installation untouched.
+
+### Conversations, fallback and diagnostics
+
+- **Voices** has separate **Conversations**, **Memories**, and **Instructions** views. Conversations group turns by exchange; searching a line retains the surrounding exchange. Use **Find pawn** to narrow the pawn dropdown, or **Use selected pawn**.
+- Once the first line is actually displayed, simulation speed no longer expires the exchange. Visibility, changed needs/health and player instructions still invalidate inappropriate text; pauses still stop reading time.
+- Topic cooldowns depend on activity level (50–125 unpaused seconds). Combat, health and colony events bypass topic suppression; critically low needs bypass that filter too. New topics, stronger social opinions and low needs influence queue priority. Similar recent non-urgent wording is rejected conservatively.
+- Memory context mixes up to six topic/listener matches, four recent memories and four defining memories, filling unused slots up to fourteen. Retrieval is based on participant IDs and word overlap, not embeddings; it never deletes the archive.
+- **Use original social bubbles when AI is unavailable or its request budget is exhausted** defaults on. Native social text is allowed during outages/budget exhaustion, or restored after a failed request if the event remains relevant. This native text follows the original renderer and other mods' rules; it is not AI-validated and is not added to SpeakYourMind's confirmed-draw transcript. Disable this option to prefer silence/eligible optional replies. Deliberately filtered chatter stays suppressed.
+- Settings show in-flight/completed/failed/cancelled requests, last/average response time, discarded exchanges and native fallback decisions. Token totals include only usage actually returned by providers; missing reports and cancelled requests can make totals incomplete. They are not a billing estimate. Metrics reset per loaded game session and combine dialogue and memory requests.
+
 ### Local model setup
 
 - **Ollama:** install Ollama, download a model suited to your hardware, start its server, choose the Ollama preset, and enter the exact installed model name. Default address: `http://localhost:11434/v1`.
@@ -34,7 +53,7 @@ Official guides: [OpenAI](https://developers.openai.com/api/docs/quickstart), [C
 
 ## What the build does
 
-- Replaces the bubble mod's default presentation while SpeakYourMind is enabled; the game's real social log is preserved.
+- Replaces selected social presentation while enabled, with configurable native fallback when the AI is unavailable; the game's real social log is preserved.
 - Uses the bubble mod's actual renderer, with animated dots during requests. Only SpeakYourMind's own bubbles get controlled lifetimes.
 - Collects social events, damage, attacks, deaths of relatives, colony letters, research completions, low needs and ambient observations.
 - Prioritizes selected and visible pawns. Off-screen significant events can enter memory without generating invisible bubbles.
@@ -119,6 +138,16 @@ The packaging workflow currently requires `build.ps1` to generate its matching m
 
 ## Next validation
 
-Follow [docs/PLAYTEST.md](docs/PLAYTEST.md) in a disposable test colony. Visual layout, bubble click navigation, pausing/resuming, save/load, provider quality and latency, and a representative mod list still require in-game checks. Keep an original save when trying an early build. Cloud and local request formats are covered with mocked transport; live provider acceptance is not established by those tests.
+Follow [docs/PLAYTEST.md](docs/PLAYTEST.md) in a disposable test colony. Visual layout, optional bubble clicks, native fallback routing, pausing/resuming, save/load, provider quality and latency, and a representative mod list still require in-game checks. Keep an original save when trying an early build. Cloud and local request formats are covered with mocked transport; live provider acceptance is not established by those tests.
 
 Design decisions and remaining work are tracked in [docs/DESIGN.md](docs/DESIGN.md).
+
+
+The game-independent suite can also run without RimWorld:
+
+```powershell
+dotnet run --project Tests/CoreRunner/CoreRunner.csproj -c Release
+pwsh -NoProfile -File Tests/Installer.Tests.ps1
+```
+
+These commands do not compile or validate the complete game integration.

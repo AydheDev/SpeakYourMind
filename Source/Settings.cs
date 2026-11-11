@@ -54,6 +54,8 @@ public sealed class SYMMod : Mod
         l.Label("Bubble integration: " + Integration.Status);
         if (l.ButtonText("Guided AI setup")) Find.WindowStack.Add(new SetupWindow(Settings.Connection));
         l.CheckboxLabeled("Enable contextual expressions", ref s.Enabled);
+        l.CheckboxLabeled("Use original social bubbles when AI is unavailable or its request budget is exhausted", ref s.NativeSocialWhenUnavailable);
+        l.Label("Original bubbles follow their own mod rules and are not included in the SpeakYourMind transcript.");
         l.CheckboxLabeled("Open dialogue history when clicking speech bubbles", ref s.ClickBubblesOpenHistory);
         l.Label("Open transcripts, memories and instructions from the Voices tab in the bottom menu. Bubble clicks are optional and off by default.");
         l.Label("Connection: " + Settings.Connection.Provider + " / " + Settings.Connection.Model);
@@ -63,6 +65,11 @@ public sealed class SYMMod : Mod
             if (Find.TickManager.Paused) l.Label("Paused — completed replies will appear after you resume.");
             if (game.RetryIn > 0) l.Label("Retrying in " + Math.Ceiling(game.RetryIn) + " seconds.");
             l.Label("Memory: " + game.MemoryStatus);
+            var metrics = game.Metrics;
+            l.Label("Requests: " + metrics.InFlight + " active · " + metrics.Completed + " completed · " + metrics.Failed + " failed · " + metrics.Cancelled + " cancelled");
+            l.Label("Response time: last " + metrics.LastSeconds.ToString("F1") + " s · average " + metrics.AverageSeconds.ToString("F1") + " s (dialogue and memory)");
+            l.Label("Reported token usage: " + metrics.InputTokens + " input / " + metrics.OutputTokens + " output · usage returned for " + metrics.ResponsesWithUsage + " of " + metrics.Started + " requests. Missing usage is not estimated; cancelled requests may still be billed.");
+            l.Label("Discarded exchanges: " + game.Discarded + " · original social fallbacks: " + game.NativeFallbacks);
             l.Label("This session: " + game.RequestsStarted + " requests · " + game.ExpressionsShown + " expressions · " + game.ActiveBubbles + " bubbles · " + game.Queued + " queued");
             if (l.ButtonText("Copy diagnostic summary (no keys or conversation text)")) GUIUtility.systemCopyBuffer = Diagnostics.Summary();
             if (l.ButtonText("Retry connection now")) game.RefreshConnections();
@@ -320,10 +327,10 @@ public static class Diagnostics
         var c = SYMMod.Instance.Settings.Connection;
         var g = SYMGame.Current;
         // Deliberately exclude keys, endpoint addresses, prompts, annotations, names and transcript text.
-        return "SpeakYourMind 0.3.3\nRuntime: " + Environment.Version + "\nBubble integration: " + Integration.Status + "\nOptional adapters: " + OptionalDialogue.Status +
+        return "SpeakYourMind 0.4.0\nRuntime: " + Environment.Version + "\nBubble integration: " + Integration.Status + "\nOptional adapters: " + OptionalDialogue.Status +
             "\nProvider: " + c.Provider + "\nGeneration enabled: " + SYMMod.Instance.Settings.Preferences.Enabled +
             "\nRequests: " + (g?.RequestsStarted ?? 0) + "\nDisplayed: " + (g?.ExpressionsShown ?? 0) + "\nFallbacks: " + (g?.FallbacksShown ?? 0) +
-            "\nDiscarded: " + (g?.Discarded ?? 0) + "\nQueued: " + (g?.Queued ?? 0) + "\nActive bubbles: " + (g?.ActiveBubbles ?? 0) +
+            "\nRequest metrics: " + (g == null ? "No colony loaded" : g.Metrics.ToString()) + "\nOriginal social fallbacks: " + (g?.NativeFallbacks ?? 0) + "\nDiscarded: " + (g?.Discarded ?? 0) + "\nQueued: " + (g?.Queued ?? 0) + "\nActive bubbles: " + (g?.ActiveBubbles ?? 0) +
             "\nExpression status: " + (g?.Status ?? "No colony loaded") + "\nMemory status: " + (g?.MemoryDiagnostic ?? "No colony loaded") + "\nDebug: " + (g?.DebugStatus ?? "No colony loaded");
     }
 }

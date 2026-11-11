@@ -1,10 +1,17 @@
 # Changes
 
-## Unreleased — optional bubble history shortcut
+## 0.4.0 — conversation reliability and usability (source update)
 
 - Added **Open dialogue history when clicking speech bubbles** to mod settings, off by default for new and existing settings. With Expanded, enabling it opens the clicked pawn's history; disabling it suppresses navigation for SpeakYourMind bubbles without sending their synthetic entries to the native log viewer.
 - The existing **Voices** bottom-menu tab remains the main entry point for transcripts, memories and instructions.
-- In-game toggle and persistence checks remain pending; see `PLAYTEST.md`.
+- Displayed conversations retain their reading time at faster simulation speeds; unspoken events still expire.
+- Added activity-dependent topic suppression, novelty/need/social salience priorities, and conservative similar-line rejection.
+- Added participant/topic memory metadata and bounded mixed retrieval (context, recent life and defining memories), compatible with version-1 saves.
+- Added configurable original social bubble fallback during outages/request-budget exhaustion and after failed AI requests. A shared per-log-entry decision avoids double observation across hook orderings.
+- Replaced the history mode dropdown with Conversations / Memories / Instructions views, grouped exchanges and pawn-name filtering.
+- Added thread-safe transport metrics and optional provider token usage, with explicit incomplete-usage reporting.
+- Added a standalone .NET 10 core runner and Windows build/test/install script with verified staging, backup and rollback.
+- Development validation: 355 core assertions and 9 installer transaction checks passed. Full game compilation, Windows discovery and in-game behavior remain pending; see `PLAYTEST.md`.
 
 ## 0.3.3 — explicit JSON input and visible setup numbers
 

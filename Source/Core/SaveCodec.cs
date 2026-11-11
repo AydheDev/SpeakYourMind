@@ -36,6 +36,7 @@ public static class SaveCodec
     {
         if (m == null || string.IsNullOrEmpty(m.Id) || m.Fact == null || !double.IsFinite(m.Day) || !float.IsFinite(m.Importance) || m.Importance < 0 || m.Importance > 1)
             throw new FormatException("The SpeakYourMind memory data is invalid.");
+        m.Topic ??= ""; m.SubjectIds ??= new(); m.SubjectIds.RemoveAll(string.IsNullOrEmpty);
         m.Source ??= "game"; m.Perspective ??= "experienced"; m.Reason ??= "";
     }
 }

@@ -22,6 +22,7 @@ Location: RimWorld's configuration folder, under `SpeakYourMind/Debug`. Every de
 | `fallback_selected` / `fallback_rejected` | Which optional source or generic preset was considered and why it was used or skipped. Selection is not proof of display. |
 | `fallback_attached` | Callouts supplied text for a pending reaction from the same pawn, category and simulation tick. It has not been selected or shown yet. |
 | `displayed` | A successful bubble draw, with exact text and speaker ID. This is what the player-facing transcript records. |
+| `native_fallback` | A still-relevant original social event was returned to the native renderer after AI became unavailable. This is routing, not confirmation of a draw. |
 | `discarded` | Stale, hidden, interrupted or otherwise cancelled work. |
 | `exchange_finished` | Display and reading time completed. A permitted fresh follow-up can be scheduled afterward. |
 | `memory_applied` / `memory_rejected` / `memory_error` | Result of background profile work. |

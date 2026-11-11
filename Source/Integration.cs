@@ -18,7 +18,8 @@ public static class Integration
     private static Type? bubble;
     private static FieldInfo? dictionary;
     private static PropertyInfo? entry;
-    private static MethodInfo? rebuild, canRender;
+    private static MethodInfo? rebuild, canRender, originalAdd;
+    [ThreadStatic] private static bool restoringOriginal;
     private static ConstructorInfo? constructor;
     public static bool Active => Ready && SYMMod.Instance.Settings.Preferences.Enabled && SYMGame.Current?.StateHealthy == true;
 
@@ -35,7 +36,7 @@ public static class Integration
             constructor = bubble.GetConstructor(new[] { typeof(Pawn), typeof(LogEntry) });
             dictionary = AccessTools.Field(bubbler, "Dictionary"); entry = AccessTools.Property(bubble, "Entry");
             rebuild = AccessTools.Method(bubble, "Rebuild"); canRender = AccessTools.Method(bubbler, "CanRender");
-            var add = AccessTools.Method(bubbler, "Add", new[] { typeof(LogEntry) });
+            var add = originalAdd = AccessTools.Method(bubbler, "Add", new[] { typeof(LogEntry) });
             var fade = AccessTools.Method(bubble, "GetFade");
             var draw = AccessTools.Method(bubble, "Draw", new[] { typeof(Vector2), typeof(bool), typeof(float) });
             if (constructor == null || dictionary == null || entry == null || rebuild == null || canRender == null || add == null || fade == null || draw == null) throw new MissingMemberException();
@@ -82,7 +83,18 @@ public static class Integration
         if (dictionary?.GetValue(null) is IDictionary dict && dict.Contains(pawn))
         { var list = (IList)dict[pawn]!; list.Remove(instance); if (list.Count == 0) dict.Remove(pawn); }
     }
-    private static bool BubbleAddPrefix() => !Active;
+    public static void RestoreOriginal(LogEntry log)
+    {
+        bool previous = restoringOriginal; restoringOriginal = true;
+        try { originalAdd!.Invoke(null, new object[] { log }); }
+        finally { restoringOriginal = previous; }
+    }
+    private static bool BubbleAddPrefix(LogEntry __0)
+    {
+        if (restoringOriginal || !Active) return true;
+        try { return !SYMGame.Current!.ObserveSocial(__0); }
+        catch { return true; } // Failed observation must not swallow the original bubble.
+    }
     private static bool FadePrefix(object __instance, ref float __result)
     {
         if (entry?.GetValue(__instance) is not ExpressionEntry own) return true;

@@ -1,4 +1,4 @@
-# 0.3.3 home playtest checklist
+# 0.4.0 home playtest checklist
 
 Use a disposable colony first. This checklist is not a record of completed in-game validation.
 
@@ -30,3 +30,14 @@ Use a disposable colony first. This checklist is not a record of completed in-ga
 26. **Debug limits:** use a small session limit, restart logging, and confirm a visible limit marker/status rather than silent loss or a game pause. Restore the usual limit afterward. Keep the full logs for prompt tuning.
 
 Start with startup, setup, one social exchange, pause/resume, and save/load. Once those pass, work through the remaining scenarios. Record the mod version, model, reasoning setting, approximate response delay and any visible error. The copied diagnostic summary helps report problems without sharing colony text.
+
+
+## 0.4.0 additional checks
+
+27. Start a multi-turn exchange, then increase simulation speed. Each displayed turn should keep its reading time; stale requests that have never displayed should still expire. Pause between turns, change maps, and disable generation to verify those cancellation paths remain intact.
+28. Repeated idle/work topics should become less frequent. Change jobs or social partners; new topics should regain priority. Observe urgent events during cooldowns. Test word-overlap repetition filtering with both short callouts and longer similar phrases.
+29. Give a pawn many permanent memories plus a recent experience with their current listener. Inspect debug prompt context: listener/topic, recent and defining memories should all have space, with at most fourteen unique entries. Load an older save and verify memories/annotations persist.
+30. Exhaust the request budget and stop the service. With native fallback enabled, new social events should use original bubbles; a still-relevant failed AI request should restore its original event once. There must be no simultaneous native and AI version of the same event. Toggle the policy off and verify quiet/optional fallback behavior. Native bubbles are intentionally absent from the SpeakYourMind transcript.
+31. In Voices, switch between the three views, filter pawn names, select an existing or departed pawn, search one turn, and verify the whole retained exchange appears chronologically. Check same-tick turn order, retention boundaries, pagination and narrow resolutions.
+32. Verify request counts, last/average latency and reported tokens against a small known provider session. Missing usage must not be presented as complete billing. Test cancellation, timeout, failed HTTP requests and a separate memory connection.
+33. Run `install.ps1` with RimWorld closed. Verify the old mod is backed up outside Mods, the installed DLL matches its manifest and existing saves/settings/credentials remain. A running game, wrong game version, ambiguous dependencies or failed tests must stop installation.

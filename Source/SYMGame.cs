@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Linq;
 using System.IO;
 using System.Threading;
+using System.Runtime.CompilerServices;
 using System.Threading.Tasks;
 using HarmonyLib;
 using RimWorld;
@@ -22,6 +23,8 @@ public sealed class SYMGame : GameComponent
     public int ExpressionsShown { get; private set; }
     public int FallbacksShown { get; private set; }
     public int Discarded { get; private set; }
+    public int NativeFallbacks { get; private set; }
+    public RequestMetricsSnapshot Metrics => provider.Metrics.Snapshot();
     public int Queued => queue.Count;
     public int ActiveBubbles => running.Count;
     public double RetryIn => expressionBackoff.Remaining(RealTime);
@@ -32,6 +35,9 @@ public sealed class SYMGame : GameComponent
     private readonly Game game;
     private readonly ProviderClient provider = new();
     private readonly RequestBudget budget = new();
+    private readonly DialogueSelection selection = new();
+    private readonly ConditionalWeakTable<LogEntry, SocialDecision> socialDecisions = new();
+    private sealed class SocialDecision { public bool Suppress; }
     private readonly FailureBackoff expressionBackoff = new(), memoryBackoff = new();
     private readonly Random expressionRandom = new(); // Never consume the game's simulation RNG.
     private readonly List<Intent> queue = new();
@@ -61,7 +67,8 @@ public sealed class SYMGame : GameComponent
         public Pawn Pawn = null!;
         public Pawn? Other;
         public Trigger Trigger;
-        public string Fact = "", Need = "";
+        public string Fact = "", Need = "", Topic = "";
+        public LogEntry? OriginalLog;
         public float NeedLevel;
         public string HealthSignature = "";
         public int Tick;
@@ -94,7 +101,7 @@ public sealed class SYMGame : GameComponent
         journal = new DebugJournal(DebugFolder, Settings.DebugSessionMegabytes);
         journal.AddSecret(Credentials.Read(SYMMod.Instance.Settings.Connection));
         journal.AddSecret(Credentials.Read(SYMMod.Instance.Settings.MemoryConnection));
-        journal.Record(new DebugEvent { Stage = "session_start", Day = Day, Detail = "SpeakYourMind 0.3.3; prompt revision 2. Loaded mods: " + string.Join(", ", LoadedModManager.RunningModsListForReading.Select(m => m.Name)) });
+        journal.Record(new DebugEvent { Stage = "session_start", Day = Day, Detail = "SpeakYourMind 0.4.0; prompt revision 2. Loaded mods: " + string.Join(", ", LoadedModManager.RunningModsListForReading.Select(m => m.Name)) });
     }
     private void Trace(string stage, Intent? intent = null, string detail = "", string text = "", string response = "", string system = "", string context = "", Connection? connection = null, double elapsed = 0, string request = "", string source = "")
     {
@@ -129,29 +136,45 @@ public sealed class SYMGame : GameComponent
         }
     }
     public Profile ProfileFor(Pawn pawn) => State.Profile(pawn.ThingID, pawn.LabelShort, Context.Tracked(pawn, Settings));
-    private void Remember(Pawn pawn, string fact, string source = "game", string perspective = "experienced")
+    private void Remember(Pawn pawn, string fact, string source = "game", string perspective = "experienced", string topic = "", IEnumerable<string>? subjects = null)
     {
         var p = ProfileFor(pawn);
         if (p.Memories.Any(m => m.Fact == fact && Day - m.Day < 0.1)) return;
-        p.Memories.Add(new Memory { Fact = fact, Source = source, Perspective = perspective, Day = Day });
+        p.Memories.Add(new Memory { Fact = fact, Source = source, Perspective = perspective, Day = Day, Topic = topic, SubjectIds = subjects?.Distinct().ToList() ?? new() });
         State.Touch();
     }
-    public void ObserveSocial(LogEntry entry)
+    public bool ObserveSocial(LogEntry entry)
     {
-        if (entry is ExpressionEntry) return;
+        if (entry is ExpressionEntry) return false;
+        // PlayLog and Bubbler hooks may run in either order. Resolve grammar and queue only once.
+        if (socialDecisions.TryGetValue(entry, out var previous)) return previous.Suppress;
+        var decision = new SocialDecision(); socialDecisions.Add(entry, decision);
+        decision.Suppress = ProcessSocial(entry);
+        return decision.Suppress;
+    }
+    private bool ProcessSocial(LogEntry entry)
+    {
         var type = entry.GetType();
-        if (entry is not PlayLogEntry_Interaction && type.Name != "PlayLogEntry_InteractionSinglePawn") return;
+        if (entry is not PlayLogEntry_Interaction && type.Name != "PlayLogEntry_InteractionSinglePawn") return false;
         var pawn = AccessTools.Field(type, "initiator")?.GetValue(entry) as Pawn;
         var other = AccessTools.Field(type, "recipient")?.GetValue(entry) as Pawn;
-        if (pawn == null) return;
+        if (pawn == null) return false;
         string text = OptionalDialogue.ReadText(entry, pawn);
         var candidate = OptionalDialogue.SocialCandidate(entry, text, Settings);
         string fact = "Social event: " + OptionalDialogue.EventLabel(entry) + ". Authored interaction text (claims are not independently verified): " + text;
         Trace("social_observed", text: text, source: candidate?.Source ?? "game", detail: pawn.ThingID + " -> " + other?.ThingID);
-        if (!Integration.Active) return;
-        if (Context.Tracked(pawn, Settings)) Remember(pawn, fact);
-        if (other != null && Context.Tracked(other, Settings)) Remember(other, fact);
-        Enqueue(pawn, Trigger.Social, fact, other, fallback: candidate);
+        if (!Integration.Active || !Settings.Social) return false;
+        string topic = OptionalDialogue.EventLabel(entry) + ":" + (other?.ThingID ?? "alone");
+        var subjects = new[] { pawn.ThingID, other?.ThingID }.OfType<string>().ToList();
+        if (Context.Tracked(pawn, Settings)) Remember(pawn, fact, topic: topic, subjects: subjects);
+        if (other != null && Context.Tracked(other, Settings)) Remember(other, fact, topic: topic, subjects: subjects);
+        bool unavailable = !Integration.Rendering || !expressionBackoff.Ready(RealTime) ||
+            !budget.Available(RealTime, Settings.RequestsPerMinute) || string.IsNullOrWhiteSpace(SYMMod.Instance.Settings.Connection.Model);
+        if (unavailable && Settings.NativeSocialWhenUnavailable) { NativeFallbacks++; return false; }
+        if (!unavailable || candidate != null)
+            Enqueue(pawn, Trigger.Social, fact, other, fallback: candidate, topic: topic, originalLog: entry);
+        // Deliberately filtered chatter stays suppressed; unavailable service follows the player's policy.
+        return true;
     }
     public bool ObserveCallout(Pawn pawn, FallbackCandidate candidate)
     {
@@ -214,14 +237,17 @@ public sealed class SYMGame : GameComponent
         var observed = Find.CurrentMap?.mapPawns.AllPawnsSpawned.Where(p => Context.CanExpress(p) && Context.ColonyAware(p)).OrderByDescending(p => Find.Selector.IsSelected(p)).FirstOrDefault();
         if (observed != null) Enqueue(observed, Trigger.Colony, fact);
     }
-    private bool Enqueue(Pawn pawn, Trigger trigger, string fact, Pawn? other = null, string need = "", float level = 0, FallbackCandidate? fallback = null, bool followUp = false, string exchange = "")
+    private bool Enqueue(Pawn pawn, Trigger trigger, string fact, Pawn? other = null, string need = "", float level = 0, FallbackCandidate? fallback = null, bool followUp = false, string exchange = "", string topic = "", LogEntry? originalLog = null)
     {
         if (!Settings.Enabled || !Settings.Allows(trigger) || !Context.CanExpress(pawn)) return false;
+        if (topic.Length == 0) topic = need.Length > 0 ? need : trigger == Trigger.Observation
+            ? (pawn.CurJob?.def.defName ?? "Idle") + ":" + pawn.Map.weatherManager.curWeather.defName : trigger.ToString();
+        if (!followUp && !(trigger == Trigger.Needs && level < 0.1f) && !selection.Allow(pawn.ThingID, trigger, topic, playTime, Settings.Activity)) return false;
         string key = pawn.ThingID + ":" + trigger;
         if (!followUp && cooldowns.TryGetValue(key, out double until) && until > RealTime) return false;
         if (other != null && (!Context.CanExpress(other) || other.Position.DistanceTo(pawn.Position) > 12)) other = null;
         var intent = new Intent { Pawn = pawn, Other = other, Trigger = trigger, Fact = fact, Need = need, NeedLevel = level,
-            HealthSignature = trigger == Trigger.Health ? Context.HealthSignature(pawn) : "", Tick = Find.TickManager.TicksGame, Created = playTime, Fallback = fallback, FollowUp = followUp };
+            HealthSignature = trigger == Trigger.Health ? Context.HealthSignature(pawn) : "", Tick = Find.TickManager.TicksGame, Created = playTime, Fallback = fallback, FollowUp = followUp, Topic = topic, OriginalLog = originalLog };
         if (exchange.Length > 0) intent.Exchange = exchange;
         int priority = Priority(intent);
         foreach (var conflict in running.Where(r => Overlaps(r.Intent, intent)).ToList())
@@ -247,11 +273,14 @@ public sealed class SYMGame : GameComponent
     }
     private static IEnumerable<string> Participants(Intent i) => new[] { i.Pawn.ThingID, i.Other?.ThingID }.OfType<string>();
     private static bool Overlaps(Intent a, Intent b) => Scheduling.Overlaps(Participants(a), Participants(b));
-    private static int Priority(Intent i) => Scheduling.Priority(i.Trigger, Find.Selector.IsSelected(i.Pawn)) + (i.Fallback?.Source == "callouts" ? 1 : 0);
-    private bool Relevant(Intent intent)
+    private int Priority(Intent i) => Scheduling.Priority(i.Trigger, Find.Selector.IsSelected(i.Pawn)) +
+        selection.Novelty(i.Pawn.ThingID, i.Trigger, i.Topic) + (i.Fallback?.Source == "callouts" ? 1 : 0) +
+        (i.Trigger == Trigger.Needs ? (int)(Math.Clamp(1 - i.NeedLevel, 0, 1) * 20) : 0) +
+        (i.Trigger == Trigger.Social && i.Other != null && i.Pawn.relations != null ? Math.Min(15, Math.Abs(i.Pawn.relations.OpinionOf(i.Other)) / 5) : 0);
+    private bool Relevant(Intent intent, bool hasDisplayed = false)
     {
         if (!Context.CanExpress(intent.Pawn) || !Settings.Allows(intent.Trigger)) return false;
-        if (Find.TickManager.TicksGame - intent.Tick > (intent.Trigger == Trigger.Combat ? 900 : 5000)) return false;
+        if (EventLifetime.Expired(intent.Trigger, intent.Tick, Find.TickManager.TicksGame, hasDisplayed)) return false;
         if (intent.Trigger == Trigger.Health && Context.HealthSignature(intent.Pawn) != intent.HealthSignature) return false;
         if (intent.Need.Length > 0)
         {
@@ -269,7 +298,7 @@ public sealed class SYMGame : GameComponent
         {
             context.Pawns.Add(Context.Capture(pawn));
             var profile = ProfileFor(pawn);
-            context.Profiles.Add(new Profile { PawnId = profile.PawnId, Name = profile.Name, Voice = profile.Voice, Annotation = profile.Annotation, Memories = MemoryPolicy.Relevant(profile, Day, s).ToList() });
+            context.Profiles.Add(new Profile { PawnId = profile.PawnId, Name = profile.Name, Voice = profile.Voice, Annotation = profile.Annotation, Memories = MemorySelection.Select(profile, Day, s, intent.Fact + " " + intent.Topic + " " + context.Pawns.Last().Job, Participants(intent).Where(id => id != pawn.ThingID)).ToList() });
         }
         if (context.Pawns.All(p => new[] { intent.Pawn, intent.Other }.Where(x => x != null).Any(x => x!.ThingID == p.Id && Context.ColonyAware(x))))
         {
@@ -309,6 +338,9 @@ public sealed class SYMGame : GameComponent
             foreach (var k in cooldowns.Where(x => x.Value < now).Select(x => x.Key).ToList()) cooldowns.Remove(k);
             foreach (var stale in queue.Where(i => !Relevant(i) || playTime - i.Created > 30).ToList()) { Trace("discarded", stale, "Queued event became stale before dispatch."); queue.Remove(stale); }
             if (!Integration.Rendering) return;
+            // Release queued social events back to the renderer if service capacity disappears after acceptance.
+            if (Settings.NativeSocialWhenUnavailable && (!expressionBackoff.Ready(now) || !budget.Available(now, Settings.RequestsPerMinute)))
+                foreach (var intent in queue.Where(i => i.OriginalLog != null).ToList()) { queue.Remove(intent); RestoreOriginal(intent); }
             // Optional source text can still appear while the service is busy or backing off.
             foreach (var queued in queue.Where(i => i.Fallback != null && playTime - i.Created >= (i.Trigger == Trigger.Combat ? 3 : Settings.FallbackDelaySeconds)).OrderByDescending(Priority).ToList())
             {
@@ -322,13 +354,19 @@ public sealed class SYMGame : GameComponent
             if (expressionBackoff.Ready(now) && running.Count < Math.Clamp(Settings.MaxBubbles, 1, 8) && running.Count(r => !r.Task.IsCompleted && !r.Delivery.HasResult) < 2 && queue.Count > 0)
             {
                 var next = queue.Where(i => !running.Any(r => Overlaps(i, r.Intent))).OrderByDescending(Priority).ThenBy(i => i.Created).FirstOrDefault();
-                if (next != null && budget.TrySpend(now, Settings.RequestsPerMinute)) { queue.Remove(next); Start(next, now); }
+                if (next != null && budget.TrySpend(now, Settings.RequestsPerMinute))
+                {
+                    queue.Remove(next);
+                    try { Start(next, now); }
+                    catch { RestoreOriginal(next); throw; }
+                }
             }
         }
         catch (Exception e) { Failed(e); }
     }
     private void BeginProfileScan()
     {
+        selection.Prune(playTime);
         foreach (var pawn in Find.Maps.SelectMany(m => m.mapPawns.AllPawnsSpawned).Where(p => !p.Dead && Context.Tracked(p, Settings))) profileScan.Enqueue(pawn);
         var aliveIds = Find.Maps.SelectMany(m => m.mapPawns.AllPawnsSpawned).Select(p => p.ThingID).ToHashSet();
         if (State.Profiles.RemoveAll(p => !p.Persistent && p.Annotation.Length == 0 && !aliveIds.Contains(p.PawnId)) > 0) State.Touch();
@@ -418,7 +456,7 @@ public sealed class SYMGame : GameComponent
     }
     private void UpdateRun(Running run, double now)
     {
-        if (!Relevant(run.Intent)) { Remove(run, reason: "Event expired, need/health changed, trigger disabled, or initiating pawn no longer observable."); return; }
+        if (!Relevant(run.Intent, run.Delivery.HasDisplayedAny)) { Remove(run, reason: "Event expired, need/health changed, trigger disabled, or initiating pawn no longer observable."); return; }
         if (!Context.Visible(run.BubblePawn)) { Remove(run, reason: "Current speaker is no longer visible."); return; }
         if (!Integration.Rendering) { Remove(run, reason: "Bubble renderer is disabled."); return; }
         if (run.Context.ColonyRule != State.ColonyRule || run.Context.Style != Settings.Style || run.Context.Length != Settings.Length || run.Context.Language != Settings.Language ||
@@ -436,13 +474,13 @@ public sealed class SYMGame : GameComponent
                     Trace("response", run.Intent, response: response, elapsed: (playTime - run.Started) * 1000, source: "ai");
                     run.Delivery.Accept(Prompts.ParseExpression(response, run.Context).Turns); expressionBackoff.Success();
                 }
-                catch (Exception e) { Trace("response_rejected", run.Intent, ProviderClient.SafeError(e)); Failed(e); if (!Fallback(run)) { Remove(run); return; } }
+                catch (Exception e) { Trace("response_rejected", run.Intent, ProviderClient.SafeError(e)); Failed(e); if (!Fallback(run)) { RestoreOriginal(run.Intent); Remove(run); return; } }
             }
             else if (run.Intent.Trigger == Trigger.Combat && playTime - run.Started > 3)
-            { if (!Fallback(run)) { Remove(run); return; } }
+            { if (!Fallback(run)) { RestoreOriginal(run.Intent); Remove(run); return; } }
             else if (run.Intent.Fallback != null && playTime - run.Intent.Created >= Settings.FallbackDelaySeconds)
             { Fallback(run); }
-            else if (playTime - run.Started > Math.Clamp(run.TimeoutSeconds, 3, 180)) { Remove(run, reason: "Request exceeded the unpaused waiting limit."); return; }
+            else if (playTime - run.Started > Math.Clamp(run.TimeoutSeconds, 3, 180)) { RestoreOriginal(run.Intent); Remove(run, reason: "Request exceeded the unpaused waiting limit."); return; }
         }
         switch (run.Delivery.Advance(playTime, false, true, playTime - lastRelease >= 0.6))
         {
@@ -457,7 +495,8 @@ public sealed class SYMGame : GameComponent
         var pawn = turn.PawnId == run.Intent.Pawn.ThingID ? run.Intent.Pawn : run.Intent.Other;
         if (pawn == null || !Context.CanExpress(pawn) || (run.Intent.Other != null && run.Intent.Pawn.Position.DistanceTo(run.Intent.Other.Position) > 12)) { Remove(run); return; }
         var recent = State.Transcript.AsEnumerable().Reverse().Where(t => t.SpeakerId == pawn.ThingID && Day - t.Day < 0.5).Take(4).Select(t => t.Text);
-        if (TextPolicy.Repeated(turn.Text, recent)) { Trace("line_rejected", run.Intent, "Repeated recent line", text: turn.Text); Remove(run); return; }
+        if (TextPolicy.Repeated(turn.Text, recent) || (!DialogueSelection.Urgent(run.Intent.Trigger) && !run.Intent.FollowUp &&
+            recent.Any(text => TopicWords.Similarity(turn.Text, text) >= 0.8))) { Trace("line_rejected", run.Intent, "Repeated recent line", text: turn.Text); Remove(run); return; }
         if (pawn != run.BubblePawn) { Integration.Remove(run.BubblePawn, run.Bubble); run.BubblePawn = pawn; run.Entry = new ExpressionEntry(pawn); run.Bubble = Integration.Add(pawn, run.Entry); }
         run.Entry.SetText(turn.Text); run.Entry.OnRendered = () => RecordRendered(run); Integration.Refresh(run.Bubble);
         lastRelease = playTime; Status = "Connected.";
@@ -469,12 +508,12 @@ public sealed class SYMGame : GameComponent
         if (turn == null) return;
         var record = new TranscriptEntry { ExchangeId = run.Exchange, SpeakerId = run.BubblePawn.ThingID, SpeakerName = run.BubblePawn.LabelShort,
             Participants = run.Context.Pawns.Select(p => p.Id).ToList(), Text = turn.Text, Day = Day, Trigger = run.Intent.Trigger.ToString(), Source = run.Source };
-        State.Record(record); ExpressionsShown++; if (run.Delivery.IsFallback) FallbacksShown++;
+        State.Record(record); selection.Displayed(run.BubblePawn.ThingID, run.Intent.Trigger, run.Intent.Topic, playTime); ExpressionsShown++; if (run.Delivery.IsFallback) FallbacksShown++;
         Trace("displayed", run.Intent, "Speaker " + record.SpeakerId + "; successfully drawn", text: record.Text, source: run.Source, elapsed: (playTime - run.Started) * 1000);
         // Generic filler is readable history, not a lasting personality event.
         if (run.Delivery.IsFallback) return;
         foreach (var pawn in new[] { run.Intent.Pawn, run.Intent.Other }.OfType<Pawn>())
-            if (Context.Tracked(pawn, Settings)) Remember(pawn, record.SpeakerName + " expressed: " + record.Text, "generated expression", "heard or expressed");
+            if (Context.Tracked(pawn, Settings)) Remember(pawn, record.SpeakerName + " expressed: " + record.Text, "generated expression", "heard or expressed", run.Intent.Topic, record.Participants);
     }
     private bool Fallback(Running run)
     {
@@ -509,6 +548,13 @@ public sealed class SYMGame : GameComponent
         bool accepted = run.Delivery.Accept(new[] { new Turn { PawnId = profile.PawnId, Text = options[index % options.Count] } }, true);
         if (accepted) { run.Source = "preset"; Trace("fallback_selected", run.Intent, "Generic combat fallback", text: options[index % options.Count], source: "preset"); }
         run.Cancellation.Cancel(); ObserveTask(run.Task); return accepted;
+    }
+    private void RestoreOriginal(Intent intent)
+    {
+        if (intent.OriginalLog == null || !Settings.NativeSocialWhenUnavailable || !Relevant(intent) || !Integration.Rendering) return;
+        var entry = intent.OriginalLog; intent.OriginalLog = null;
+        Integration.RestoreOriginal(entry); NativeFallbacks++;
+        Trace("native_fallback", intent, "Original social bubble restored after AI request failure.", source: "game");
     }
     private void Remove(Running run, bool discarded = true, string reason = "Cancelled before completion.")
     {
