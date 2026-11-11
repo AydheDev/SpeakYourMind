@@ -17,7 +17,7 @@ public sealed class ProviderClient : IDisposable
     public ProviderClient(HttpMessageHandler? handler = null)
     {
         http = new HttpClient(handler ?? new HttpClientHandler { AllowAutoRedirect = false });
-        http.Timeout = TimeSpan.FromSeconds(45);
+        http.Timeout = Timeout.InfiniteTimeSpan;
         http.MaxResponseContentBufferSize = 256 * 1024;
     }
     public static Uri ValidateEndpoint(string url)
@@ -30,37 +30,35 @@ public sealed class ProviderClient : IDisposable
     }
     public static HttpRequestMessage BuildRequest(Connection c, string key, string system, string context)
     {
-        var root = ValidateEndpoint(c.BaseUrl);
-        if (key.Any(char.IsControl)) throw new ArgumentException("The API key contains a line break or control character. Paste only the key itself.");
-        if (string.IsNullOrWhiteSpace(c.Model)) throw new ArgumentException("Choose a model first.");
-        if (string.IsNullOrWhiteSpace(key) && !root.IsLoopback) throw new ArgumentException("Add the API key for this server first.");
+        var root = ValidateConfiguration(c, key);
+        int outputTokens = Math.Clamp(c.OutputTokens, 256, 16000);
         var body = new Dictionary<string, object>();
         string path;
         switch (c.Provider)
         {
             case ProviderKind.OpenAI:
                 path = "responses";
-                body["model"] = c.Model; body["instructions"] = system; body["input"] = context;
-                body["store"] = false; body["max_output_tokens"] = 2200;
+                body["model"] = c.Model.Trim(); body["instructions"] = system; body["input"] = context;
+                body["store"] = false; body["max_output_tokens"] = outputTokens;
                 if (c.SendReasoning && c.Reasoning != "provider default") body["reasoning"] = new { effort = c.Reasoning };
                 body["text"] = new { format = new { type = "json_object" } };
                 break;
             case ProviderKind.Claude:
                 path = "messages";
-                body["model"] = c.Model; body["system"] = system; body["max_tokens"] = 1800;
+                body["model"] = c.Model.Trim(); body["system"] = system; body["max_tokens"] = outputTokens;
                 body["messages"] = new[] { new { role = "user", content = context } };
                 break;
             case ProviderKind.Gemini:
-                path = "models/" + Uri.EscapeDataString(c.Model) + ":generateContent";
+                path = "models/" + Uri.EscapeDataString(c.Model.Trim()) + ":generateContent";
                 body["systemInstruction"] = new { parts = new[] { new { text = system } } };
                 body["contents"] = new[] { new { role = "user", parts = new[] { new { text = context } } } };
-                body["generationConfig"] = new { maxOutputTokens = 2200, responseMimeType = "application/json" };
+                body["generationConfig"] = new { maxOutputTokens = outputTokens, responseMimeType = "application/json" };
                 break;
             default:
                 path = "chat/completions";
-                body["model"] = c.Model;
+                body["model"] = c.Model.Trim();
                 body["messages"] = new[] { new { role = "system", content = system }, new { role = "user", content = context } };
-                body["max_tokens"] = 1800; body["stream"] = false;
+                body["max_tokens"] = outputTokens; body["stream"] = false;
                 if (c.SendReasoning && c.Reasoning != "provider default") body["reasoning_effort"] = c.Reasoning;
                 break;
         }
@@ -68,18 +66,34 @@ public sealed class ProviderClient : IDisposable
         { Content = new StringContent(SYMJson.Write(body), Encoding.UTF8, "application/json") };
         if (c.Provider == ProviderKind.Claude)
         {
-            request.Headers.Add("x-api-key", key);
+            request.Headers.Add("x-api-key", key.Trim());
             request.Headers.Add("anthropic-version", "2023-06-01");
         }
-        else if (c.Provider == ProviderKind.Gemini) request.Headers.Add("x-goog-api-key", key);
+        else if (c.Provider == ProviderKind.Gemini) request.Headers.Add("x-goog-api-key", key.Trim());
         else if (!string.IsNullOrWhiteSpace(key)) request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", key.Trim());
         return request;
+    }
+    public static Uri ValidateConfiguration(Connection c, string key)
+    {
+        if (!Enum.IsDefined(c.Provider)) throw new ArgumentException("Choose a supported provider type.");
+        if (string.IsNullOrWhiteSpace(c.BaseUrl)) throw new ArgumentException("Enter the AI server address first.");
+        var root = ValidateEndpoint(c.BaseUrl);
+        if (key.Any(char.IsControl)) throw new ArgumentException("The API key contains a line break or control character. Paste only the key itself.");
+        if (string.IsNullOrWhiteSpace(c.Model)) throw new ArgumentException("Choose a model first.");
+        if (string.IsNullOrWhiteSpace(key) && !root.IsLoopback) throw new ArgumentException("Add the API key for this server first.");
+        return root;
     }
     public async Task<string> Generate(Connection c, string key, string system, string context, CancellationToken token)
     {
         using var request = BuildRequest(c, key, system, context);
-        using var response = await http.SendAsync(request, token).ConfigureAwait(false);
-        if (!response.IsSuccessStatusCode) throw new ProviderException(FriendlyError(response.StatusCode));
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
+        timeout.CancelAfter(TimeSpan.FromSeconds(Math.Clamp(c.TimeoutSeconds, 3, 180)));
+        using var response = await http.SendAsync(request, timeout.Token).ConfigureAwait(false);
+        if (!response.IsSuccessStatusCode)
+        {
+            double retryAfter = response.Headers.RetryAfter?.Delta?.TotalSeconds ?? (response.Headers.RetryAfter?.Date - DateTimeOffset.UtcNow)?.TotalSeconds ?? 0;
+            throw new ProviderException(FriendlyError(response.StatusCode), Math.Clamp(retryAfter, 0, 600));
+        }
         var content = await response.Content.ReadAsStringAsync(token).ConfigureAwait(false);
         return Extract(c.Provider, content);
     }
@@ -113,6 +127,27 @@ public sealed class ProviderClient : IDisposable
         catch (Exception e) when (e is KeyNotFoundException || e is InvalidOperationException || e is IndexOutOfRangeException)
         { throw new FormatException("The service returned an unsupported response. Check the provider type and model."); }
     }
+    public async Task<List<string>> ListModels(Connection connection, string key, CancellationToken token)
+    {
+        if (connection.Provider is not (ProviderKind.OpenAI or ProviderKind.Compatible)) throw new ArgumentException("Enter the model name from this provider's dashboard.");
+        var check = connection.Copy(); check.Model = "model-list";
+        var root = ValidateConfiguration(check, key);
+        using var request = new HttpRequestMessage(HttpMethod.Get, new Uri(root, "models"));
+        if (!string.IsNullOrWhiteSpace(key)) request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", key.Trim());
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
+        timeout.CancelAfter(TimeSpan.FromSeconds(15));
+        using var response = await http.SendAsync(request, timeout.Token).ConfigureAwait(false);
+        if (!response.IsSuccessStatusCode) throw new ProviderException(FriendlyError(response.StatusCode));
+        return ExtractModels(await response.Content.ReadAsStringAsync(timeout.Token).ConfigureAwait(false));
+    }
+    public static List<string> ExtractModels(string json)
+    {
+        using var doc = JsonDocument.Parse(json);
+        if (!doc.RootElement.TryGetProperty("data", out var data) || data.ValueKind != JsonValueKind.Array) throw new FormatException("This server does not return a compatible model list.");
+        return data.EnumerateArray().Where(m => m.ValueKind == JsonValueKind.Object && m.TryGetProperty("id", out var id) && id.ValueKind == JsonValueKind.String)
+            .Select(m => m.GetProperty("id").GetString()!).Where(id => !string.IsNullOrWhiteSpace(id) && id.Length <= 200)
+            .Distinct().OrderBy(id => id, StringComparer.OrdinalIgnoreCase).Take(500).ToList();
+    }
     public static string FriendlyError(HttpStatusCode code) => (int)code switch
     {
         401 or 403 => "The service rejected the credentials or model access. Check your API key and account permissions.",
@@ -123,7 +158,12 @@ public sealed class ProviderClient : IDisposable
         _ => "The service could not complete the request (HTTP " + (int)code + ")."
     };
     public static string SafeError(Exception e) => e is ProviderException || e is ArgumentException || e is FormatException ? e.Message :
+        e is JsonException ? "The model returned malformed JSON. Try another model or increase its output allowance." :
         e is OperationCanceledException ? "The request timed out or was cancelled." : "Could not connect. Check the network or start your local model server.";
     public void Dispose() => http.Dispose();
 }
-public sealed class ProviderException : Exception { public ProviderException(string message) : base(message) { } }
+public sealed class ProviderException : Exception
+{
+    public double RetryAfterSeconds { get; }
+    public ProviderException(string message, double retryAfterSeconds = 0) : base(message) { RetryAfterSeconds = retryAfterSeconds; }
+}

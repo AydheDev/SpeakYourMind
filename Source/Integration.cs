@@ -90,7 +90,10 @@ public static class Integration
     private static void DrawPostfix(object __instance, bool __result)
     {
         if (__result && Event.current.type == EventType.Repaint && entry?.GetValue(__instance) is ExpressionEntry own)
-            own.Rendered = true;
+        {
+            try { own.OnRendered?.Invoke(); }
+            catch { Log.WarningOnce("[SpeakYourMind] A displayed line could not be recorded.", 17393013); }
+        }
     }
     private static bool NavigationPrefix(Pawn __0, LogEntry __1)
     {
@@ -113,15 +116,20 @@ public static class Integration
         if (!__0.verbProps.violent) return;
         Observe(g => { if (AccessTools.Field(typeof(Pawn_HealthTracker), "pawn").GetValue(__instance) is Pawn pawn) g.ObserveAttack(pawn, __1); });
     }
-    private static void WorldClearPrefix() { SYMGame.Current?.Shutdown(); }
-    private static void DeathPrefix(Pawn __instance, out List<Pawn> __state)
+    private static void WorldClearPrefix()
     {
-        __state = new();
-        if (!Active || __instance.Dead) return;
-        try { __state = Find.Maps.SelectMany(m => m.mapPawns.AllPawnsSpawned).Where(p => p != __instance && p.relations != null && p.GetRelations(__instance).Any()).ToList(); } catch { }
+        try { SYMGame.Current?.Shutdown(); }
+        catch { Log.Warning("[SpeakYourMind] Cleanup could not finish; the game will continue unloading normally."); }
     }
-    private static void DeathPostfix(Pawn __instance, List<Pawn> __state)
-    { if (__instance.Dead) Observe(g => g.ObserveDeath(__instance, __state)); }
+    private static void DeathPrefix(Pawn __instance, out List<DeathRelation>? __state)
+    {
+        __state = null;
+        if (!Active || __instance.Dead) return;
+        try { __state = Find.Maps.SelectMany(m => m.mapPawns.AllPawnsSpawned).Where(p => p != __instance && p.relations != null)
+            .Select(p => new DeathRelation(p, string.Join(", ", p.GetRelations(__instance).Select(r => r.label)))).Where(r => r.Relationship.Length > 0).ToList(); } catch { }
+    }
+    private static void DeathPostfix(Pawn __instance, List<DeathRelation>? __state)
+    { if (__instance.Dead && __state != null) Observe(g => g.ObserveDeath(__instance, __state)); }
     private static void ResearchPostfix(ResearchProjectDef __0) => Observe(g => g.ObserveColony("Research completed: " + __0.LabelCap));
     private static void LetterPostfix(Letter __0) => Observe(g => g.ObserveColony(TextPolicySafe(__0.Label.ToString()) + (__0 is ChoiceLetter choice ? ": " + TextPolicySafe(AccessTools.Field(typeof(ChoiceLetter), "text")?.GetValue(choice)?.ToString() ?? "") : "")));
     private static string TextPolicySafe(string value) => Core.TextPolicy.Clean(value).Truncate(1200);
@@ -131,11 +139,13 @@ public static class Integration
 public sealed class ExpressionEntry : LogEntry
 {
     public string Text = "…";
-    public bool Alive = true, Rendered;
+    public bool Alive = true;
+    public Action? OnRendered;
     private readonly Pawn pawn;
     public ExpressionEntry(Pawn pawn) : base(null) { this.pawn = pawn; }
     protected override string ToGameStringFromPOV_Worker(Thing pov, bool forceLog) => Text;
     public override bool Concerns(Thing thing) => thing == pawn;
     public override IEnumerable<Thing> GetConcerns() { yield return pawn; }
-    public void SetText(string text) { Text = text; Rendered = false; ResetCache(); }
+    public void SetText(string text) { Text = text; ResetCache(); }
 }
+public sealed record DeathRelation(Pawn Pawn, string Relationship);

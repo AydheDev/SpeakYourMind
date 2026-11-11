@@ -29,10 +29,21 @@ $compilation = [Microsoft.CodeAnalysis.CSharp.CSharpCompilation]::Create($assemb
 $outDir = Join-Path $PSScriptRoot $(if ($Tests) { 'artifacts/tests' } else { '1.7/Assemblies' })
 [IO.Directory]::CreateDirectory($outDir) | Out-Null
 $output = Join-Path $outDir ($assemblyName + '.dll')
-$stream = [IO.File]::Create($output)
+$temporaryOutput = $output + '.tmp'
+$stream = [IO.File]::Create($temporaryOutput)
 try { $result = $compilation.Emit($stream) } finally { $stream.Dispose() }
 $result.Diagnostics | Where-Object { $_.Severity -eq 'Error' -or $_.Severity -eq 'Warning' } | ForEach-Object ToString
-if (!$result.Success) { throw 'Compilation failed.' }
+if (!$result.Success) { Remove-Item -LiteralPath $temporaryOutput; throw 'Compilation failed. The previous successful assembly was preserved.' }
+[IO.File]::Move($temporaryOutput, $output, $true)
+$inputs = @($files) + @(Get-Item -LiteralPath (Join-Path $PSScriptRoot 'Source/SpeakYourMind.csproj'), $PSCommandPath, (Join-Path $PSScriptRoot 'About/About.xml'))
+$manifest = [ordered]@{
+    version = ([xml](Get-Content -LiteralPath (Join-Path $PSScriptRoot 'About/About.xml') -Raw)).ModMetaData.modVersion
+    builtUtc = [DateTimeOffset]::UtcNow.ToString('O')
+    rimworld = [IO.File]::ReadAllText((Join-Path $RimWorldDir 'Version.txt')).Trim()
+    binarySha256 = (Get-FileHash -LiteralPath $output -Algorithm SHA256).Hash
+    files = @($inputs | Sort-Object FullName | ForEach-Object { @{ path = [IO.Path]::GetRelativePath($PSScriptRoot, $_.FullName).Replace('\','/'); sha256 = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash } })
+}
+[IO.File]::WriteAllText((Join-Path $outDir ($assemblyName + '.build.json')), ($manifest | ConvertTo-Json -Depth 5), [Text.UTF8Encoding]::new($false))
 "Built $output"
 if ($Tests) {
     [System.Runtime.Loader.AssemblyLoadContext]::Default.add_Resolving({ param($ctx,$name)

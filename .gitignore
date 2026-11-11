@@ -6,6 +6,7 @@ artifacts/
 *.suo
 *.dll
 *.pdb
+*.build.json
 *.zip
 /credentials*
 .env*

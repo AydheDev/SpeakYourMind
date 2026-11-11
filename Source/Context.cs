@@ -54,7 +54,8 @@ public static class Context
         }
         return result;
     }
-    public static string StableFacts(PawnSnapshot s) => SYMJson.Write(new { s.Kind, s.Background, s.Traits, s.Beliefs, s.Relationships, s.Health });
+    public static string StableFacts(PawnSnapshot s) => SYMJson.Write(new { s.Kind, s.Background, Traits = s.Traits.OrderBy(t => t), s.Beliefs, Relationships = s.Relationships.OrderBy(t => t), Health = s.Health.OrderBy(t => t) });
+    public static string HealthSignature(Pawn p) => string.Join("|", p.health.hediffSet.hediffs.Select(h => h.def.defName + ":" + h.Part?.Label + ":" + (int)(h.Severity * 4)).OrderBy(s => s)) + ";pain:" + (int)(p.health.hediffSet.PainTotal * 5);
     public static string Fingerprint(string text) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text)));
     public static List<string> Resources(Map map)
     {

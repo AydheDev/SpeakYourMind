@@ -14,14 +14,15 @@ namespace SpeakYourMind.Tests;
 public static class Suite
 {
     private static int assertions;
-    private static void Check(bool value, string name) { if (!value) throw new Exception("FAILED: " + name); assertions++; }
-    private static void Throws<T>(Action action, string name) where T : Exception
+    internal static void Check(bool value, string name) { if (!value) throw new Exception("FAILED: " + name); assertions++; }
+    internal static void Throws<T>(Action action, string name) where T : Exception
     { try { action(); } catch (T) { assertions++; return; } throw new Exception("FAILED: expected " + typeof(T).Name + ": " + name); }
     public static string Run()
     {
         assertions = 0;
         Memories(); History(); PromptsAndText(); Providers(); Serialization(); Budget(); ReflectionContracts();
         Transport().GetAwaiter().GetResult();
+        PolishTests.Run();
         return "PASS: " + assertions + " assertions (memory, history, provider requests/responses, mocked transport, budget, serialization, installed 1.7 integration contracts).";
     }
     private static void Memories()

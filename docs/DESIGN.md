@@ -20,7 +20,7 @@ SpeakYourMind conveys the world from each pawn's perspective. It is presentation
 
 Personal perspective is primary. Broad colony awareness remains available without pretending everyone witnessed an event. Verified facts, generated conversations and subjective characterization are labeled separately. Colony awareness is restricted for outsiders so enemies do not acquire private colony knowledge. Species, age, background, traits, skills, beliefs, relationships, physical state, apparel, equipment and environment guide expression. Tech level does not imply an inability to speak.
 
-Profiles update automatically in the background. Colonists, prisoners, slaves, player-owned animals/mechs and optionally hosted guests persist. Others have temporary context and a readable transcript. Player annotations remain separate from generated personality: individual instructions override colony instructions, both guide expression, and neither rewrites verified game facts.
+Profiles update automatically in the background. Colonists, prisoners, slaves, player-owned animals/mechs and optionally hosted guests persist, including if they subsequently leave. Others have temporary character context and a readable transcript, without background personality requests. Player annotations remain separate from generated personality: individual instructions override colony instructions, both guide expression, and neither rewrites verified game facts.
 
 ## Memory
 
@@ -34,11 +34,11 @@ Complete transcripts are the default. Pawn and colony retention limits are indep
 
 ## AI and setup
 
-OpenAI first, extensible providers and local models. First build implements OpenAI Responses, OpenAI-compatible chat, Claude Messages and Gemini generateContent. No provider SDK is bundled. One model handles everything by default; a separate memory connection is optional. Low reasoning where the protocol/model supports it. API credentials are per server and Windows user, encrypted separately from saves. Guided setup includes official help, endpoint/model entry, a connection test and preferences. Consumer account login is not implemented.
+OpenAI first, extensible providers and local models. Implements OpenAI Responses, OpenAI-compatible chat, Claude Messages and Gemini generateContent. No provider SDK is bundled. One model handles everything by default; a separate memory connection is optional. Low reasoning where the protocol/model supports it. API credentials are per server and Windows user, encrypted separately from saves. Guided setup uses a draft connection until a successful preview is saved. OpenAI and compatible servers can supply a model list. Timeout and output allowance are configurable. Consumer account login is not implemented.
 
 ## Architecture
 
-- `Core/`: game-independent models, memory/transcript rules, prompt contract, HTTP request/response adapters and rate budget.
+- `Core/`: game-independent models, memory/transcript rules, prompt contract, HTTP request/response adapters, request budget, exchange delivery state, save validation, history query cache and connection drafts.
 - `Context`: snapshots game objects only on the game thread; workers receive serialized data.
 - `Integration`: narrowly scoped Harmony observers and a checked, reflection-based bubble adapter. Suppression is at `Bubbler.Add`, never at the game's social event or log creation.
 - `SYMGame`: save-scoped scheduling, lifecycle cancellation, stale reply checks, transcripts and asynchronous memory work.
@@ -49,11 +49,11 @@ OpenAI first, extensible providers and local models. First build implements Open
 - Live in-game validation and performance measurement at large colony sizes.
 - Live OpenAI/local/provider acceptance and quality testing; credentials were not available during initial development.
 - Original bubble backend verification on 1.7; only Expanded's installed interface is verified.
-- More complete event adapters: recovery/health transitions, witnessed combat aftermath, non-letter environmental developments, precise facilities for mod-added needs.
+- More complete event adapters: finer health transitions beyond periodic observed-state changes, witnessed combat aftermath, non-letter environmental developments, precise facilities for mod-added needs.
 - Better semantic memory retrieval/compaction for very long campaigns; current selection is bounded by importance/recency, and complete transcripts increase save size.
 - Animal/species response validation currently relies on prompt instructions and input data, not a formal language classifier.
 - Arbitrary creative rules are instructions to the model, not a mathematical guarantee. Invalid length/JSON/participants are rejected; custom-rule fallback caches are invalidated when rules change. Deterministic suffix transformations are not yet implemented.
-- Provider model discovery, curated fast-model recommendations and more provider-specific reasoning controls.
+- Model discovery beyond OpenAI/compatible servers, curated fast-model recommendations and more provider-specific reasoning controls.
 - Login/OAuth only if a provider explicitly permits the relevant integration; no assumption that consumer subscriptions provide API access.
 - UI localization; initial UI is English, output language is configurable.
 - Non-Windows credential storage, Steam Workshop metadata/preview and release workflow.
@@ -63,6 +63,7 @@ OpenAI first, extensible providers and local models. First build implements Open
 
 - [OpenAI text generation](https://developers.openai.com/api/docs/guides/text)
 - [OpenAI reasoning](https://developers.openai.com/api/docs/guides/reasoning)
+- [OpenAI model listing](https://developers.openai.com/api/reference/resources/models/methods/list)
 - [Claude Messages](https://platform.claude.com/docs/en/api/messages)
 - [Gemini text generation](https://aistudio.google.com/docs/text-generation)
 - [Ollama compatibility](https://docs.ollama.com/api/openai-compatibility)
