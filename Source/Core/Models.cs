@@ -34,6 +34,9 @@ public sealed class Preferences
     public int PawnHistoryDays, ColonyHistoryDays; // Zero means forever.
     public float MemoryScaleDays = 30, MemoryExponent = 1.4f;
     public bool TrackGuests, Social = true, Needs = true, Health = true, Combat = true, Colony = true, Observation = true;
+    public bool SpeakUpFallback, VSIEFallback, RumorFallback, CalloutsFallback, DebugLogging;
+    public bool FollowUps = true;
+    public int FallbackDelaySeconds = 6, DebugSessionMegabytes = 50;
     public string ColonyRule = "", Language = "English";
     public int EffectiveLimit => MaxCharacters > 0 ? Math.Clamp(MaxCharacters, 1, 2000) : Length switch { ExpressionLength.Brief => 100, ExpressionLength.Descriptive => 420, _ => 240 };
     public bool Allows(Trigger t) => t switch { Trigger.Social => Social, Trigger.Needs => Needs, Trigger.Health => Health, Trigger.Combat => Combat, Trigger.Colony => Colony, _ => Observation };
@@ -48,6 +51,7 @@ public sealed class Preferences
         MemoryExponent = float.IsFinite(MemoryExponent) ? Math.Clamp(MemoryExponent, 0.2f, 4) : 1.4f;
         Language = string.IsNullOrWhiteSpace(Language) ? "English" : TextPolicy.Clean(Language);
         ColonyRule ??= "";
+        FallbackDelaySeconds = Math.Clamp(FallbackDelaySeconds, 2, 30); DebugSessionMegabytes = Math.Clamp(DebugSessionMegabytes, 1, 1000);
     }
 }
 

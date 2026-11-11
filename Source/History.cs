@@ -105,7 +105,7 @@ public sealed class HistoryView
         {
             cacheKey = key;
             rows = mode == "Memories" ? memoryLines.Skip(page * 60).Take(60).ToList() : query.Page(page).Select(t =>
-                "Day " + t.Day.ToString("F2") + " · " + t.SpeakerName + " · " + t.Trigger + (t.Source == "preset" ? " · fallback" : "") + " · exchange " + t.ExchangeId[..Math.Min(6, t.ExchangeId.Length)] + "\n" + t.Text).ToList();
+                "Day " + t.Day.ToString("F2") + " · " + t.SpeakerName + " · " + t.Trigger + (t.Source == "preset" ? " · generic fallback" : t.Source.StartsWith("fallback:") ? " · " + FallbackPolicy.Label(t.Source[9..]) + " fallback" : " · AI") + " · exchange " + t.ExchangeId[..Math.Min(6, t.ExchangeId.Length)] + "\n" + t.Text).ToList();
             if (rows.Count == 0) rows.Add("No matching expressions yet. Enable generation and observe some pawns, or adjust the filters.");
             heights = rows.Select(t => Text.CalcHeight(t, contentWidth) + 18).ToArray();
         }

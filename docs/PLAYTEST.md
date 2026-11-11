@@ -1,4 +1,4 @@
-# 0.2.0 home playtest checklist
+# 0.3.0 home playtest checklist
 
 Use a disposable colony first. This checklist is not a record of completed in-game validation.
 
@@ -22,5 +22,11 @@ Use a disposable colony first. This checklist is not a record of completed in-ga
 18. **Length presets:** with character override zero, switch Brief/Standard/Descriptive. Enter a small exact override, then restore zero. Confirm the displayed limit and accepted text follow the chosen setting.
 19. **Separate memory service:** configure an unavailable memory server while dialogue works. Confirm memory retries without silencing expressions. Use a slow local model to check timeout controls.
 20. **Diagnostics:** use **Copy diagnostic summary** in settings. Check counters/status are useful and no keys, server addresses, pawn names, annotations or dialogue appear.
+21. **Optional sources:** enable one source at a time, with its mod installed and working for your game version. Use a slow local response to verify the exact event's text appears after the delay and has the correct source in history. Repeat with SpeakUp Extension, Child or ChildSFW as separate mod-list configurations. Confirm narration summaries are rejected in Dialogue mode.
+22. **Fallback boundaries:** add an individual/colony instruction, choose a different output language, lower the character cap, and observe animals/mechs. Optional text that cannot meet those constraints must not become a SpeakYourMind fallback. Native rejected Callouts output remains under Callouts' own controls.
+23. **Callouts:** test both attached and floating modes. An accepted event should appear through SpeakYourMind once, without a second native mote. Disable the adapter and confirm Callouts' normal output returns. Wound-number motes and unrelated floating text must remain unaffected.
+24. **Follow-ups:** let a social fallback display and finish. Its listener should be eligible for a fresh AI reply that acknowledges the line, with the same exchange ID and at most the remaining turn allowance. Toggle follow-ups off, move the listener away, pause, or interrupt with combat. No endless chains, invented listeners, unseen-triggered replies or late overwrite should occur.
+25. **Debug journal:** enable debug mode, generate good and rejected responses, trigger a fallback, add a playtest note, then disable it. Inspect the readable and JSONL files using the copied folder path. Match `request`, `provider_completed`, `displayed` and exchange IDs. Verify completed-but-discarded replies are distinguishable from shown text, keys are redacted, and switching colonies creates a new session.
+26. **Debug limits:** use a small session limit, restart logging, and confirm a visible limit marker/status rather than silent loss or a game pause. Restore the usual limit afterward. Keep the full logs for prompt tuning.
 
 Start with startup, setup, one social exchange, pause/resume, and save/load. Once those pass, work through the remaining scenarios. Record the mod version, model, reasoning setting, approximate response delay and any visible error. The copied diagnostic summary helps report problems without sharing colony text.

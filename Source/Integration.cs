@@ -56,8 +56,9 @@ public static class Integration
             var open = navigation == null ? null : AccessTools.Method(navigation, "Open");
             if (open != null) harmony.Patch(open, prefix: new HarmonyMethod(typeof(Integration), nameof(NavigationPrefix)));
             Ready = true;
+            try { OptionalDialogue.Initialize(); } catch { OptionalDialogue.Status = "Optional adapter initialization failed; base integration remains available."; }
             Status = expanded ? "Expanded connected" : "Original interface detected (experimental on 1.7)";
-            if (ids.Any(id => id.Contains("rimtalk") || id.Contains("rimdialogue") || id.Contains("speakup")))
+            if (ids.Any(id => id.Contains("rimtalk") || id.Contains("rimdialogue")))
                 Status += ". Another dialogue producer is active; disable its bubble generation to prevent competing text.";
         }
         catch
@@ -105,7 +106,11 @@ public static class Integration
         if (!Active) return;
         try { action(SYMGame.Current!); } catch { Log.WarningOnce("[SpeakYourMind] An event could not be observed. Gameplay was left unchanged.", 17393011); }
     }
-    private static void LogPostfix(LogEntry __0) => Observe(g => g.ObserveSocial(__0));
+    private static void LogPostfix(LogEntry __0)
+    {
+        try { if (SYMGame.Current is { } game && (Active || SYMMod.Instance.Settings.Preferences.DebugLogging)) game.ObserveSocial(__0); }
+        catch { Log.WarningOnce("[SpeakYourMind] A social event could not be captured.", 17393015); }
+    }
     private static void DamagePostfix(Pawn_HealthTracker __instance, DamageInfo __0, float __1)
     {
         if (__1 <= 0) return;

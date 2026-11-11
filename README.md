@@ -6,7 +6,7 @@ An early-development, display-only RimWorld **1.7** mod. Pawns express their nee
 
 ## Status
 
-Version **0.2.0 — prepared for first playtest**, compiled against installed **1.7.5005 rev1082** and the installed Expanded 1.7 interface. **258 automated assertions** and **8 bubble interface checks** pass. **Not yet verified in a running colony or against a live AI service.** The original Interaction Bubbles integration is experimental and interface-checked at startup; it is not certified for 1.7. This is not a finished Workshop release. Changes are listed in [docs/CHANGELOG.md](docs/CHANGELOG.md).
+Version **0.3.0 — optional dialogue adapters and playtest logging**, compiled against installed **1.7.5005 rev1082** and the installed Expanded 1.7 interface. **303 automated assertions** and **8 bubble interface checks** pass. **Not yet verified in a running colony or against a live AI service.** The original Interaction Bubbles integration is experimental and interface-checked at startup; it is not certified for 1.7. This is not a finished Workshop release. Changes are listed in [docs/CHANGELOG.md](docs/CHANGELOG.md).
 
 ## Install and set up
 
@@ -20,7 +20,7 @@ Version **0.2.0 — prepared for first playtest**, compiled against installed **
 8. Continue, then choose **Save and enable SpeakYourMind**. Cancelling setup preserves your current connection; changes to the model, key, or request settings require another successful test before saving.
 9. Default preferences are **Hybrid**, **Standard**, and **Lively (3/4)**. The character override starts at zero, using the length preset: Brief 100, Standard 240, Descriptive 420. You can enter an exact override from 1 to 2,000 visible characters, including punctuation and annotation additions.
 
-If upgrading from 0.1.0, replace the installed SpeakYourMind folder while the game is closed. Existing history and player instructions use the same save format. Existing explicit character overrides remain unchanged; set the override to zero to follow length presets.
+If upgrading from 0.1.0 or 0.2.0, replace the installed SpeakYourMind folder while the game is closed. Existing history and player instructions use the same save format. Existing explicit character overrides remain unchanged; set the override to zero to follow length presets.
 
 ### Local model setup
 
@@ -55,11 +55,39 @@ Official guides: [OpenAI](https://developers.openai.com/api/docs/quickstart), [C
 - For a timeout, raise **Request timeout** in guided setup. For incomplete output, increase **Output allowance** or lower reasoning. Retest before saving.
 - If a short hard limit or a strict creative rule rejects a response, the bubble may clear. The mod does not fall back to text that ignores player instructions.
 
+## Optional quick replies and follow-ups
+
+Enable individual sources under **Optional quick replies when AI is slow**. They are off by default and do not become required dependencies:
+
+| Source | How it is used |
+| --- | --- |
+| SpeakUp | Reuses the already resolved text for that social interaction. |
+| SpeakUp Extension, SpeakUp Child, SpeakUp ChildSFW | Uses the final installed SpeakUp rules, including these packs. Choose Child or ChildSFW in your mod list; they are alternatives. |
+| Vanilla Social Interactions Expanded | Can display the current interaction's own event text, which may be narration rather than direct speech. |
+| Rumor Has It | Can display the current gossip/interaction text. Rumors remain allegations in AI context. The reviewed continued release lists support through 1.6; 1.7 is unverified. |
+| Callouts | Captures resolved text from its known display interface. Routes it through SpeakYourMind only when accepted for the current event, avoiding a duplicate native callout. The reviewed continued release lists support through 1.6; 1.7 is unverified. |
+
+The default quick-reply delay is **6 unpaused seconds**, configurable from 2–30. Combat retains its 3-second fallback. An available optional reply can also be used while requests are queued or the AI service is backing off. No dialogue library is copied into this mod, and no social interaction is triggered just to obtain a line.
+
+**Allow follow-up lines** is on by default, with or without optional mods. A displayed social fallback may receive a fresh AI reply after its reading time. The reply receives the actual displayed line as context and shares its exchange ID in history. The fallback consumes one turn of the 2–4-turn exchange limit. Late results from the original request cannot replace it. Follow-ups respect visibility, pause, request budgets and higher-priority events.
+
+Fallback text must fit the character limit, species, selected style and language. Arbitrary player instructions cannot be verified for externally authored text, so those rules exclude optional-mod fallbacks; existing rule-specific generic caches remain available. Mod-generated summaries are excluded in Dialogue mode. Optional mods retain their own gameplay effects and content restrictions; ChildSFW does not by itself set an AI-wide profanity rule.
+
+See [the adapter notes and version boundaries](docs/COMPATIBILITY.md).
+
+## Debugging the first playtest
+
+Enable **Debug: record dialogue and full prompt context to local files** in mod settings. This is separate from RimWorld developer mode and from the ordinary save transcript.
+
+Each session produces a readable `.txt` report and a `.jsonl` file. They contain observed social lines, supported Callouts emissions, AI prompts and context, returned model text, validation failures, fallback choices, displayed lines, memory updates and timing. Add a **Playtest note** when a response feels wrong. Use **Copy debug folder path** to find the files.
+
+Debugging is off by default. It records colony details, names and player instructions; known API credentials are redacted, request headers/endpoints are not logged, and nothing is uploaded. The default session cap is 50 MB across both files. A reached limit or write failure is reported explicitly. Existing debug sessions are kept for review. See [docs/DEBUGGING.md](docs/DEBUGGING.md) for the workflow and event meanings.
+
 ## Compatibility boundaries
 
 SpeakYourMind has its own namespace, package ID, Harmony owner, save keys and settings. It adds no relationship, mood, work or decision effects. It does not overwrite other mods' files or edit their XML definitions. Its scheduling uses a private RNG, not the game simulation RNG.
 
-This does **not** guarantee compatibility with every mod. SpeakUp, RimTalk, RimDialogue, or other text producers can compete over the same bubbles. A detected competing producer is reported in the settings screen. Disable competing generation for the initial test. Expanded itself includes its own social/frequency features; SpeakYourMind does not disable or change them.
+This does **not** guarantee compatibility with every mod. SpeakUp has a scoped text adapter; RimTalk, RimDialogue, or other independent AI text producers can still compete over the same bubbles. A detected competing producer is reported in settings. Expanded itself includes its own social/frequency features; SpeakYourMind does not disable or change them. Optional adapters check known interfaces at runtime and preserve native behavior if they cannot take responsibility for a line. None has yet been playtested with a running colony.
 
 Unknown or changed bubble interfaces leave SpeakYourMind inactive and preserve the existing bubble behaviour. Only one bubble backend should be enabled. Mod-added needs are read generically; specialized concepts such as “no usable toilet” are not inferred without a dedicated integration. A low need alone is not proof of a missing facility.
 

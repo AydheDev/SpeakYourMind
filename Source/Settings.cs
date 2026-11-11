@@ -38,6 +38,7 @@ public sealed class SYMMod : Mod
     private Vector2 scroll;
     private float settingsHeight = 1550;
     private string characterBuffer = "", pawnDaysBuffer = "", colonyDaysBuffer = "";
+    private string fallbackDelayBuffer = "", debugLimitBuffer = "", debugNote = "";
     public SYMMod(ModContentPack pack) : base(pack)
     {
         Instance = this; Settings = GetSettings<SYMSettings>();
@@ -72,6 +73,7 @@ public sealed class SYMMod : Mod
         l.Label("Current limit: " + s.EffectiveLimit + " visible characters, including punctuation and player-rule additions.");
         s.MaxBubbles = (int)l.SliderLabeled("Simultaneous bubbles: " + s.MaxBubbles, s.MaxBubbles, 1, 8);
         s.MaxTurns = (int)l.SliderLabeled("Maximum exchange turns: " + s.MaxTurns, s.MaxTurns, 2, 4);
+        l.CheckboxLabeled("Allow follow-up lines (including replies after a quick fallback)", ref s.FollowUps);
         s.RequestsPerMinute = (int)l.SliderLabeled("AI requests per real minute: " + s.RequestsPerMinute, s.RequestsPerMinute, 1, 60);
         s.Language = l.TextEntryLabeled("Expression language", s.Language);
         l.GapLine();
@@ -82,6 +84,16 @@ public sealed class SYMMod : Mod
         l.CheckboxLabeled("Colony events", ref s.Colony);
         l.CheckboxLabeled("Ambient observations", ref s.Observation);
         l.CheckboxLabeled("Keep persistent guest profiles", ref s.TrackGuests);
+        l.GapLine();
+        l.Label("Optional quick replies when AI is slow");
+        l.Label(OptionalDialogue.Status);
+        l.CheckboxLabeled("Use SpeakUp text, including installed Extension / Child / ChildSFW content", ref s.SpeakUpFallback);
+        l.CheckboxLabeled("Use Vanilla Social Interactions Expanded event text", ref s.VSIEFallback);
+        l.CheckboxLabeled("Use Rumor Has It event text", ref s.RumorFallback);
+        l.CheckboxLabeled("Route supported Callouts text through SpeakYourMind", ref s.CalloutsFallback);
+        l.TextFieldNumericLabeled("Quick reply delay (unpaused seconds)", ref s.FallbackDelaySeconds, ref fallbackDelayBuffer, 2, 30);
+        l.Label("Only text from the current event is eligible. Combat still falls back after 3 seconds. Player instructions, language, species and length checks take priority. Social event summaries require Hybrid or Narration. These mods are optional and installed separately; their own gameplay features remain active.");
+        l.Label("SpeakUp Child and ChildSFW are alternative content packs. Choose the version you want in your mod list; SpeakYourMind uses the final installed rules, not a second copy of their dialogue.");
         l.GapLine();
         l.Label("History retention is in game days. Zero = complete transcript.");
         l.TextFieldNumericLabeled("Pawn history days (0 = forever)", ref s.PawnHistoryDays, ref pawnDaysBuffer, 0, 60000);
@@ -95,6 +107,20 @@ public sealed class SYMMod : Mod
         if (Settings.SeparateMemoryModel && l.ButtonText("Configure memory model")) Find.WindowStack.Add(new SetupWindow(Settings.MemoryConnection, true));
         if (l.ButtonText("Open colony history and annotations") && Current.Game != null) Find.WindowStack.Add(new HistoryWindow());
         l.Label("Player instructions are saved per colony. Select a pawn in the history window to add an individual instruction.");
+        l.GapLine();
+        l.CheckboxLabeled("Debug: record dialogue and full prompt context to local files", ref s.DebugLogging);
+        l.Label("Off by default. Debug files contain pawn names, colony details, player instructions, prompts, model replies, fallback decisions and displayed text. API credentials and request headers are excluded. Nothing is uploaded automatically. Review files before sharing.");
+        l.TextFieldNumericLabeled("Debug session size limit (MB; next session)", ref s.DebugSessionMegabytes, ref debugLimitBuffer, 1, 1000);
+        if (SYMGame.Current is { } debugGame)
+        {
+            debugGame.SyncDebug(); l.Label("Debug: " + debugGame.DebugStatus);
+            if (l.ButtonText("Copy debug folder path")) GUIUtility.systemCopyBuffer = SYMGame.DebugFolder;
+            if (s.DebugLogging)
+            {
+                debugNote = l.TextEntryLabeled("Playtest note", debugNote);
+                if (debugNote.Trim().Length > 0 && l.ButtonText("Add note to debug log")) { debugGame.AddDebugNote(debugNote); debugNote = ""; }
+            }
+        }
         settingsHeight = l.CurHeight + 20; l.End(); Widgets.EndScrollView();
     }
 }
@@ -277,10 +303,10 @@ public static class Diagnostics
         var c = SYMMod.Instance.Settings.Connection;
         var g = SYMGame.Current;
         // Deliberately exclude keys, endpoint addresses, prompts, annotations, names and transcript text.
-        return "SpeakYourMind 0.2.0\nRuntime: " + Environment.Version + "\nBubble integration: " + Integration.Status +
+        return "SpeakYourMind 0.3.0\nRuntime: " + Environment.Version + "\nBubble integration: " + Integration.Status + "\nOptional adapters: " + OptionalDialogue.Status +
             "\nProvider: " + c.Provider + "\nGeneration enabled: " + SYMMod.Instance.Settings.Preferences.Enabled +
             "\nRequests: " + (g?.RequestsStarted ?? 0) + "\nDisplayed: " + (g?.ExpressionsShown ?? 0) + "\nFallbacks: " + (g?.FallbacksShown ?? 0) +
             "\nDiscarded: " + (g?.Discarded ?? 0) + "\nQueued: " + (g?.Queued ?? 0) + "\nActive bubbles: " + (g?.ActiveBubbles ?? 0) +
-            "\nExpression status: " + (g?.Status ?? "No colony loaded") + "\nMemory status: " + (g?.MemoryDiagnostic ?? "No colony loaded");
+            "\nExpression status: " + (g?.Status ?? "No colony loaded") + "\nMemory status: " + (g?.MemoryDiagnostic ?? "No colony loaded") + "\nDebug: " + (g?.DebugStatus ?? "No colony loaded");
     }
 }

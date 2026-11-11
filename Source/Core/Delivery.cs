@@ -16,6 +16,7 @@ public sealed class ExchangeDelivery
     private bool recorded, ended;
     public bool HasResult => turns != null;
     public bool IsFallback { get; private set; }
+    public bool CurrentWasDisplayed => recorded;
     public Turn? Current => index >= 0 && turns != null ? turns[index] : null;
     public bool Accept(IEnumerable<Turn> result, bool fallback = false)
     {

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
+using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using HarmonyLib;
@@ -40,6 +41,10 @@ public sealed class SYMGame : GameComponent
     private readonly Dictionary<int, (double time, List<string> items)> resources = new();
     private readonly Dictionary<string, int> fallbackIndices = new();
     private readonly Queue<Pawn> profileScan = new();
+    private DebugJournal? journal;
+    public static string DebugFolder => Path.Combine(GenFilePaths.ConfigFolderPath, "SpeakYourMind", "Debug");
+    public string DebugStatus => journal?.Status ?? "Off";
+    private string memoryRequestId = "";
     private Task<string>? memoryTask;
     private Profile? memoryProfile;
     private string memoryFingerprint = "", memoryFacts = "", memorySignature = "";
@@ -61,6 +66,9 @@ public sealed class SYMGame : GameComponent
         public string HealthSignature = "";
         public int Tick;
         public double Created;
+        public string Id = Guid.NewGuid().ToString("N"), Exchange = Guid.NewGuid().ToString("N");
+        public FallbackCandidate? Fallback;
+        public bool FollowUp;
     }
     private sealed class Running
     {
@@ -74,10 +82,36 @@ public sealed class SYMGame : GameComponent
         public object Bubble = null!;
         public Pawn BubblePawn = null!;
         public readonly ExchangeDelivery Delivery = new();
-        public string Exchange = Guid.NewGuid().ToString("N");
+        public string Exchange = "", Source = "ai";
     }
 
     public SYMGame(Game game) { this.game = game; }
+    public void SyncDebug()
+    {
+        if (disposed) return;
+        if (!Settings.DebugLogging) { journal?.Dispose(); journal = null; return; }
+        if (journal != null) return;
+        journal = new DebugJournal(DebugFolder, Settings.DebugSessionMegabytes);
+        journal.AddSecret(Credentials.Read(SYMMod.Instance.Settings.Connection));
+        journal.AddSecret(Credentials.Read(SYMMod.Instance.Settings.MemoryConnection));
+        journal.Record(new DebugEvent { Stage = "session_start", Day = Day, Detail = "SpeakYourMind 0.3.0; prompt revision 2. Loaded mods: " + string.Join(", ", LoadedModManager.RunningModsListForReading.Select(m => m.Name)) });
+    }
+    private void Trace(string stage, Intent? intent = null, string detail = "", string text = "", string response = "", string system = "", string context = "", Connection? connection = null, double elapsed = 0, string request = "", string source = "")
+    {
+        SyncDebug();
+        journal?.Record(new DebugEvent { Stage = stage, Request = intent?.Id ?? request, Day = Day, Trigger = intent?.Trigger.ToString() ?? "",
+            Source = source, Detail = (intent == null ? "" : "Exchange " + intent.Exchange + ". ") + detail + (connection == null ? "" : "; provider " + connection.Provider + "; output tokens " + connection.OutputTokens + "; timeout seconds " + connection.TimeoutSeconds), Text = text, Response = response,
+            SystemPrompt = system, Context = context, Model = connection?.Model ?? "", Reasoning = connection == null ? "" : connection.SendReasoning ? connection.Reasoning : "provider default", ElapsedMs = elapsed });
+    }
+    public void AddDebugNote(string note) => Trace("player_note", detail: note);
+    private void TraceCompletion(Task<string> task, string id, string source)
+    {
+        if (journal is not { } captured) return;
+        double started = RealTime, day = Day;
+        _ = task.ContinueWith(t => captured.Record(new DebugEvent { Request = id, Day = day, Stage = "provider_completed", Source = source,
+            ElapsedMs = (RealTime - started) * 1000, Response = t.IsCompletedSuccessfully ? t.Result : "",
+            Detail = t.IsCanceled ? "Cancelled" : t.IsFaulted ? ProviderClient.SafeError(t.Exception!.GetBaseException()) : "Received; validation and display are separate events." }), TaskScheduler.Default);
+    }
     public override void ExposeData()
     {
         string json = "";
@@ -110,10 +144,39 @@ public sealed class SYMGame : GameComponent
         var pawn = AccessTools.Field(type, "initiator")?.GetValue(entry) as Pawn;
         var other = AccessTools.Field(type, "recipient")?.GetValue(entry) as Pawn;
         if (pawn == null) return;
-        string fact = TextPolicy.Clean(entry.ToGameStringFromPOV(pawn, true));
+        string text = OptionalDialogue.ReadText(entry, pawn);
+        var candidate = OptionalDialogue.SocialCandidate(entry, text, Settings);
+        string fact = "Social event: " + OptionalDialogue.EventLabel(entry) + ". Authored interaction text (claims are not independently verified): " + text;
+        Trace("social_observed", text: text, source: candidate?.Source ?? "game", detail: pawn.ThingID + " -> " + other?.ThingID);
+        if (!Integration.Active) return;
         if (Context.Tracked(pawn, Settings)) Remember(pawn, fact);
         if (other != null && Context.Tracked(other, Settings)) Remember(other, fact);
-        Enqueue(pawn, Trigger.Social, fact, other);
+        Enqueue(pawn, Trigger.Social, fact, other, fallback: candidate);
+    }
+    public bool ObserveCallout(Pawn pawn, FallbackCandidate candidate)
+    {
+        Trace("callout_emitted", text: candidate.Text, source: "callouts", detail: pawn.ThingID + "; " + candidate.Definition + "; emission is not proof of an on-screen draw");
+        if (!Integration.Active || !Settings.CalloutsFallback || !Context.CanExpress(pawn)) return false;
+        string def = candidate.Definition.ToLowerInvariant();
+        var trigger = def.Contains("ranged") || def.Contains("melee") || def.Contains("combat") ? Trigger.Combat : def.Contains("hediff") || def.Contains("wound") ? Trigger.Health : Trigger.Observation;
+        // Keep this exact event separate: never reuse a hit/kill callout for a later attack.
+        var probe = new Intent { Pawn = pawn, Trigger = trigger, Fact = "Callouts emitted text for " + candidate.Definition + ". Treat the wording as expression, not independent evidence: " + candidate.Text, Fallback = candidate };
+        if (FallbackPolicy.Rejection(candidate, Capture(probe), Settings).Length > 0) return false;
+        // A damage/attack observer may have queued this same tick's reaction before Callouts resolves.
+        // Attach only to an unspoken reaction from this pawn, category and tick, never an older event.
+        if (trigger is Trigger.Combat or Trigger.Health)
+        {
+            int tick = Find.TickManager.TicksGame;
+            var pending = running.FirstOrDefault(r => r.Intent.Pawn == pawn && r.Intent.Trigger == trigger && r.Intent.Tick == tick && !r.Delivery.HasResult && r.Intent.Fallback == null)?.Intent
+                ?? queue.FirstOrDefault(i => i.Pawn == pawn && i.Trigger == trigger && i.Tick == tick && i.Fallback == null);
+            if (pending != null)
+            {
+                pending.Fallback = candidate;
+                Trace("fallback_attached", pending, candidate.Definition + "; same-tick observed reaction", text: candidate.Text, source: "callouts");
+                return true;
+            }
+        }
+        return Enqueue(pawn, trigger, probe.Fact, fallback: candidate);
     }
     public void ObserveDamage(Pawn pawn, DamageInfo damage)
     {
@@ -151,36 +214,40 @@ public sealed class SYMGame : GameComponent
         var observed = Find.CurrentMap?.mapPawns.AllPawnsSpawned.Where(p => Context.CanExpress(p) && Context.ColonyAware(p)).OrderByDescending(p => Find.Selector.IsSelected(p)).FirstOrDefault();
         if (observed != null) Enqueue(observed, Trigger.Colony, fact);
     }
-    private void Enqueue(Pawn pawn, Trigger trigger, string fact, Pawn? other = null, string need = "", float level = 0)
+    private bool Enqueue(Pawn pawn, Trigger trigger, string fact, Pawn? other = null, string need = "", float level = 0, FallbackCandidate? fallback = null, bool followUp = false, string exchange = "")
     {
-        if (!Settings.Enabled || !Settings.Allows(trigger) || !Context.CanExpress(pawn)) return;
+        if (!Settings.Enabled || !Settings.Allows(trigger) || !Context.CanExpress(pawn)) return false;
         string key = pawn.ThingID + ":" + trigger;
-        if (cooldowns.TryGetValue(key, out double until) && until > RealTime) return;
+        if (!followUp && cooldowns.TryGetValue(key, out double until) && until > RealTime) return false;
         if (other != null && (!Context.CanExpress(other) || other.Position.DistanceTo(pawn.Position) > 12)) other = null;
         var intent = new Intent { Pawn = pawn, Other = other, Trigger = trigger, Fact = fact, Need = need, NeedLevel = level,
-            HealthSignature = trigger == Trigger.Health ? Context.HealthSignature(pawn) : "", Tick = Find.TickManager.TicksGame, Created = playTime };
+            HealthSignature = trigger == Trigger.Health ? Context.HealthSignature(pawn) : "", Tick = Find.TickManager.TicksGame, Created = playTime, Fallback = fallback, FollowUp = followUp };
+        if (exchange.Length > 0) intent.Exchange = exchange;
         int priority = Priority(intent);
         foreach (var conflict in running.Where(r => Overlaps(r.Intent, intent)).ToList())
         {
             // Urgent events can displace an unspoken ambient request, never an already displayed line.
-            if (priority <= Priority(conflict.Intent) || conflict.Delivery.Current != null) return;
-            Remove(conflict);
+            if (priority <= Priority(conflict.Intent) || conflict.Delivery.Current != null) return false;
+            Remove(conflict, reason: "Replaced by a higher-priority event.");
         }
         var queued = queue.Where(i => Overlaps(i, intent)).ToList();
-        if (queued.Any(i => Priority(i) >= priority)) return;
-        foreach (var item in queued) queue.Remove(item);
+        if (queued.Any(i => Priority(i) >= priority)) return false;
+        foreach (var item in queued) { Trace("discarded", item, "Replaced by a higher-priority queued event."); queue.Remove(item); }
         if (queue.Count >= 24)
         {
             var lowest = queue.OrderBy(Priority).First();
-            if (Priority(lowest) >= priority) return;
+            if (Priority(lowest) >= priority) return false;
             queue.Remove(lowest);
+            Trace("discarded", lowest, "Queue full; displaced by a higher-priority event.");
         }
         queue.Add(intent);
+        Trace("queued", intent, fact, source: fallback?.Source ?? "");
         cooldowns[key] = RealTime + (trigger == Trigger.Combat ? 10 : 65 - Math.Clamp(Settings.Activity, 1, 4) * 10);
+        return true;
     }
     private static IEnumerable<string> Participants(Intent i) => new[] { i.Pawn.ThingID, i.Other?.ThingID }.OfType<string>();
     private static bool Overlaps(Intent a, Intent b) => Scheduling.Overlaps(Participants(a), Participants(b));
-    private static int Priority(Intent i) => Scheduling.Priority(i.Trigger, Find.Selector.IsSelected(i.Pawn));
+    private static int Priority(Intent i) => Scheduling.Priority(i.Trigger, Find.Selector.IsSelected(i.Pawn)) + (i.Fallback?.Source == "callouts" ? 1 : 0);
     private bool Relevant(Intent intent)
     {
         if (!Context.CanExpress(intent.Pawn) || !Settings.Allows(intent.Trigger)) return false;
@@ -197,7 +264,7 @@ public sealed class SYMGame : GameComponent
     {
         var s = Settings;
         var context = new GenerationContext { Event = intent.Fact, Trigger = intent.Trigger.ToString(), ColonyRule = State.ColonyRule,
-            Language = s.Language, MaxCharacters = s.EffectiveLimit, MaxTurns = intent.Other == null ? 1 : Math.Clamp(s.MaxTurns, 2, 4), Style = s.Style, Length = s.Length };
+            Language = s.Language, MaxCharacters = s.EffectiveLimit, MaxTurns = ConversationPolicy.Turns(s, intent.Other != null, intent.FollowUp), Style = s.Style, Length = s.Length };
         foreach (var pawn in new[] { intent.Pawn, intent.Other }.Where(p => p != null).Cast<Pawn>())
         {
             context.Pawns.Add(Context.Capture(pawn));
@@ -218,6 +285,7 @@ public sealed class SYMGame : GameComponent
     public override void GameComponentUpdate()
     {
         if (disposed) return;
+        SyncDebug();
         double now = RealTime, delta = Math.Clamp(now - lastUpdate, 0, 0.25); lastUpdate = now;
         if (Verse.Current.Game != game) { StopAll(); return; }
         if (!Settings.Enabled || !Integration.Ready || !StateHealthy)
@@ -239,8 +307,15 @@ public sealed class SYMGame : GameComponent
             if (now >= nextAmbient) { Ambient(); nextAmbient = now + new[] { 25, 12, 6, 3 }[Math.Clamp(Settings.Activity - 1, 0, 3)]; }
             if ((int)Day != lastCleanupDay) { State.Prune(Day, Settings); lastCleanupDay = (int)Day; }
             foreach (var k in cooldowns.Where(x => x.Value < now).Select(x => x.Key).ToList()) cooldowns.Remove(k);
-            queue.RemoveAll(i => !Relevant(i) || playTime - i.Created > 30);
+            foreach (var stale in queue.Where(i => !Relevant(i) || playTime - i.Created > 30).ToList()) { Trace("discarded", stale, "Queued event became stale before dispatch."); queue.Remove(stale); }
             if (!Integration.Rendering) return;
+            // Optional source text can still appear while the service is busy or backing off.
+            foreach (var queued in queue.Where(i => i.Fallback != null && playTime - i.Created >= (i.Trigger == Trigger.Combat ? 3 : Settings.FallbackDelaySeconds)).OrderByDescending(Priority).ToList())
+            {
+                if (running.Count >= Math.Clamp(Settings.MaxBubbles, 1, 8)) break;
+                if (running.Any(r => Overlaps(r.Intent, queued))) continue;
+                if (TryQueuedFallback(queued)) queue.Remove(queued);
+            }
             // Reserve occasional capacity for memory even when the visible-expression queue stays busy.
             if (memoryTask == null && memoryBackoff.Ready(now) && now >= nextMemory && (queue.Count == 0 || now - lastMemoryStart > 60))
             { try { StartMemory(now); } catch (Exception e) { MemoryFailed(e); } }
@@ -311,50 +386,78 @@ public sealed class SYMGame : GameComponent
         var context = Capture(intent);
         var connection = SYMMod.Instance.Settings.Connection.Copy();
         string key = Credentials.Read(connection);
+        journal?.AddSecret(key);
         ProviderClient.ValidateConfiguration(connection, key);
         var cancellation = CancellationTokenSource.CreateLinkedTokenSource(session.Token);
         var entry = new ExpressionEntry(intent.Pawn);
-        var run = new Running { Intent = intent, Context = context, Started = playTime, TimeoutSeconds = connection.TimeoutSeconds, Entry = entry, BubblePawn = intent.Pawn, Cancellation = cancellation };
+        var run = new Running { Intent = intent, Context = context, Started = playTime, TimeoutSeconds = connection.TimeoutSeconds, Entry = entry, BubblePawn = intent.Pawn, Cancellation = cancellation, Exchange = intent.Exchange };
         try
         {
             run.Bubble = Integration.Add(intent.Pawn, entry);
-            run.Task = provider.Generate(connection, key, Prompts.ExpressionSystem, SYMJson.Write(context), cancellation.Token);
+            string input = SYMJson.Write(context);
+            Trace("request", intent, system: Prompts.ExpressionSystem, context: input, connection: connection, source: "ai");
+            run.Task = provider.Generate(connection, key, Prompts.ExpressionSystem, input, cancellation.Token);
+            TraceCompletion(run.Task, intent.Id, "ai");
             running.Add(run); RequestsStarted++; Status = "Generating expressions…";
         }
         catch { cancellation.Cancel(); cancellation.Dispose(); if (run.Bubble != null) Integration.Remove(intent.Pawn, run.Bubble); throw; }
     }
+    private bool TryQueuedFallback(Intent intent)
+    {
+        var context = Capture(intent);
+        string rejection = FallbackPolicy.Rejection(intent.Fallback, context, Settings);
+        if (rejection.Length > 0) { Trace("fallback_rejected", intent, rejection, source: intent.Fallback?.Source ?? ""); intent.Fallback = null; return false; }
+        var run = new Running { Intent = intent, Context = context, Started = playTime, Entry = new ExpressionEntry(intent.Pawn), BubblePawn = intent.Pawn,
+            Cancellation = CancellationTokenSource.CreateLinkedTokenSource(session.Token), Task = Task.FromResult(""), Exchange = intent.Exchange };
+        try
+        {
+            run.Bubble = Integration.Add(intent.Pawn, run.Entry); running.Add(run);
+            Fallback(run); return true;
+        }
+        catch { if (running.Contains(run)) Remove(run); else run.Cancellation.Dispose(); throw; }
+    }
     private void UpdateRun(Running run, double now)
     {
-        if (!Relevant(run.Intent) || !Context.Visible(run.BubblePawn) || !Integration.Rendering) { Remove(run); return; }
+        if (!Relevant(run.Intent)) { Remove(run, reason: "Event expired, need/health changed, trigger disabled, or initiating pawn no longer observable."); return; }
+        if (!Context.Visible(run.BubblePawn)) { Remove(run, reason: "Current speaker is no longer visible."); return; }
+        if (!Integration.Rendering) { Remove(run, reason: "Bubble renderer is disabled."); return; }
         if (run.Context.ColonyRule != State.ColonyRule || run.Context.Style != Settings.Style || run.Context.Length != Settings.Length || run.Context.Language != Settings.Language ||
-            run.Context.Profiles.Any(p => p.Annotation != State.Profiles.Find(x => x.PawnId == p.PawnId)?.Annotation)) { Remove(run); return; }
+            run.Context.MaxTurns != ConversationPolicy.Turns(Settings, run.Intent.Other != null, run.Intent.FollowUp) ||
+            run.Context.Profiles.Any(p => p.Annotation != State.Profiles.Find(x => x.PawnId == p.PawnId)?.Annotation)) { Remove(run, reason: "Player instructions or expression settings changed while waiting."); return; }
         if (!run.Delivery.HasResult)
         {
             string dots = new[] { ".  ", ".. ", "...", "   " }[(int)(playTime * 3) % 4];
             if (run.Entry.Text != dots) { run.Entry.SetText(dots); Integration.Refresh(run.Bubble); }
             if (run.Task.IsCompleted)
             {
-                try { run.Delivery.Accept(Prompts.ParseExpression(run.Task.GetAwaiter().GetResult(), run.Context).Turns); expressionBackoff.Success(); }
-                catch (Exception e) { Failed(e); if (!Fallback(run)) { Remove(run); return; } }
+                try
+                {
+                    string response = run.Task.GetAwaiter().GetResult();
+                    Trace("response", run.Intent, response: response, elapsed: (playTime - run.Started) * 1000, source: "ai");
+                    run.Delivery.Accept(Prompts.ParseExpression(response, run.Context).Turns); expressionBackoff.Success();
+                }
+                catch (Exception e) { Trace("response_rejected", run.Intent, ProviderClient.SafeError(e)); Failed(e); if (!Fallback(run)) { Remove(run); return; } }
             }
             else if (run.Intent.Trigger == Trigger.Combat && playTime - run.Started > 3)
             { if (!Fallback(run)) { Remove(run); return; } }
-            else if (playTime - run.Started > Math.Clamp(run.TimeoutSeconds, 3, 180)) { Remove(run); return; }
+            else if (run.Intent.Fallback != null && playTime - run.Intent.Created >= Settings.FallbackDelaySeconds)
+            { Fallback(run); }
+            else if (playTime - run.Started > Math.Clamp(run.TimeoutSeconds, 3, 180)) { Remove(run, reason: "Request exceeded the unpaused waiting limit."); return; }
         }
         switch (run.Delivery.Advance(playTime, false, true, playTime - lastRelease >= 0.6))
         {
             case DeliveryAction.Show: ShowTurn(run); break;
-            case DeliveryAction.Finished: Remove(run, false); break;
+            case DeliveryAction.Finished: Remove(run, !run.Delivery.CurrentWasDisplayed, run.Delivery.CurrentWasDisplayed ? "All accepted turns completed." : "Bubble expired without a successful draw."); break;
         }
     }
     private void ShowTurn(Running run)
     {
         var turn = run.Delivery.Current!;
-        if (!TextPolicy.Valid(turn.Text, Settings.EffectiveLimit)) { Remove(run); return; }
+        if (!TextPolicy.Valid(turn.Text, Settings.EffectiveLimit)) { Trace("line_rejected", run.Intent, "Current character limit", text: turn.Text); Remove(run); return; }
         var pawn = turn.PawnId == run.Intent.Pawn.ThingID ? run.Intent.Pawn : run.Intent.Other;
         if (pawn == null || !Context.CanExpress(pawn) || (run.Intent.Other != null && run.Intent.Pawn.Position.DistanceTo(run.Intent.Other.Position) > 12)) { Remove(run); return; }
         var recent = State.Transcript.AsEnumerable().Reverse().Where(t => t.SpeakerId == pawn.ThingID && Day - t.Day < 0.5).Take(4).Select(t => t.Text);
-        if (TextPolicy.Repeated(turn.Text, recent)) { Remove(run); return; }
+        if (TextPolicy.Repeated(turn.Text, recent)) { Trace("line_rejected", run.Intent, "Repeated recent line", text: turn.Text); Remove(run); return; }
         if (pawn != run.BubblePawn) { Integration.Remove(run.BubblePawn, run.Bubble); run.BubblePawn = pawn; run.Entry = new ExpressionEntry(pawn); run.Bubble = Integration.Add(pawn, run.Entry); }
         run.Entry.SetText(turn.Text); run.Entry.OnRendered = () => RecordRendered(run); Integration.Refresh(run.Bubble);
         lastRelease = playTime; Status = "Connected.";
@@ -365,8 +468,9 @@ public sealed class SYMGame : GameComponent
         var turn = run.Delivery.MarkRendered(playTime);
         if (turn == null) return;
         var record = new TranscriptEntry { ExchangeId = run.Exchange, SpeakerId = run.BubblePawn.ThingID, SpeakerName = run.BubblePawn.LabelShort,
-            Participants = run.Context.Pawns.Select(p => p.Id).ToList(), Text = turn.Text, Day = Day, Trigger = run.Intent.Trigger.ToString(), Source = run.Delivery.IsFallback ? "preset" : "ai" };
+            Participants = run.Context.Pawns.Select(p => p.Id).ToList(), Text = turn.Text, Day = Day, Trigger = run.Intent.Trigger.ToString(), Source = run.Source };
         State.Record(record); ExpressionsShown++; if (run.Delivery.IsFallback) FallbacksShown++;
+        Trace("displayed", run.Intent, "Speaker " + record.SpeakerId + "; successfully drawn", text: record.Text, source: run.Source, elapsed: (playTime - run.Started) * 1000);
         // Generic filler is readable history, not a lasting personality event.
         if (run.Delivery.IsFallback) return;
         foreach (var pawn in new[] { run.Intent.Pawn, run.Intent.Other }.OfType<Pawn>())
@@ -374,6 +478,23 @@ public sealed class SYMGame : GameComponent
     }
     private bool Fallback(Running run)
     {
+        if (run.Intent.Fallback is { } candidate)
+        {
+            string reason = FallbackPolicy.Rejection(candidate, run.Context, Settings);
+            if (reason.Length == 0)
+            {
+                bool sourceAccepted = run.Delivery.Accept(new[] { new Turn { PawnId = run.Intent.Pawn.ThingID, Text = candidate.Text } }, true);
+                if (sourceAccepted)
+                {
+                    run.Source = "fallback:" + candidate.Source;
+                    Trace("fallback_selected", run.Intent, candidate.Definition, text: candidate.Text, source: candidate.Source, context: journal == null ? "" : SYMJson.Write(run.Context));
+                    run.Cancellation.Cancel(); ObserveTask(run.Task);
+                }
+                return sourceAccepted;
+            }
+            Trace("fallback_rejected", run.Intent, reason, text: candidate.Text, source: candidate.Source);
+            run.Intent.Fallback = null;
+        }
         if (run.Intent.Trigger != Trigger.Combat) return false;
         var profile = ProfileFor(run.Intent.Pawn);
         var options = profile.FallbackSignature == Prompts.Signature(Settings, State.ColonyRule, profile) ? profile.Fallbacks.Where(f => TextPolicy.Valid(f, Settings.EffectiveLimit)).ToList() : new List<string>();
@@ -386,25 +507,33 @@ public sealed class SYMGame : GameComponent
         if (options.Count == 0) return false;
         fallbackIndices.TryGetValue(profile.PawnId, out int index); fallbackIndices[profile.PawnId] = index + 1;
         bool accepted = run.Delivery.Accept(new[] { new Turn { PawnId = profile.PawnId, Text = options[index % options.Count] } }, true);
+        if (accepted) { run.Source = "preset"; Trace("fallback_selected", run.Intent, "Generic combat fallback", text: options[index % options.Count], source: "preset"); }
         run.Cancellation.Cancel(); ObserveTask(run.Task); return accepted;
     }
-    private void Remove(Running run, bool discarded = true)
+    private void Remove(Running run, bool discarded = true, string reason = "Cancelled before completion.")
     {
         if (!running.Remove(run)) return;
         if (discarded) Discarded++;
+        Trace(discarded ? "discarded" : "exchange_finished", run.Intent, reason, source: run.Source);
+        bool continueConversation = ConversationPolicy.ContinueAfterFallback(discarded, run.Delivery.IsFallback, run.Intent.FollowUp, run.Intent.Other != null, Settings);
+        string previousText = run.Delivery.Current?.Text ?? "";
         run.Delivery.Cancel(); run.Entry.OnRendered = null; run.Entry.Alive = false;
         try { Integration.Remove(run.BubblePawn, run.Bubble); }
         catch { Log.WarningOnce("[SpeakYourMind] A bubble could not be removed. Its request was cancelled and its display was expired.", 17393014); }
         finally { run.Cancellation.Cancel(); run.Cancellation.Dispose(); ObserveTask(run.Task); }
+        if (continueConversation && Context.CanExpress(run.Intent.Other!) && Context.CanExpress(run.Intent.Pawn) && run.Intent.Other!.Position.DistanceTo(run.Intent.Pawn.Position) <= 12)
+            Enqueue(run.Intent.Other!, Trigger.Social, "Continue this conversation after the already displayed line from " + run.Intent.Pawn.LabelShort + ": " + previousText +
+                ". Respond naturally; do not repeat it or invent events. Original event: " + run.Intent.Fact, run.Intent.Pawn, followUp: true, exchange: run.Exchange);
     }
     private static void ObserveTask(Task task) => _ = task.ContinueWith(t => { _ = t.Exception; }, TaskContinuationOptions.OnlyOnFaulted);
     private void StopAll()
     {
         foreach (var run in running.ToArray()) Remove(run);
+        foreach (var intent in queue) Trace("discarded", intent, "Session stopped or connection reset before dispatch.");
         queue.Clear(); profileScan.Clear(); session.Cancel(); session.Dispose(); session = new();
         if (memoryTask != null) ObserveTask(memoryTask); memoryTask = null;
     }
-    public void Shutdown() { if (disposed) return; StopAll(); session.Dispose(); provider.Dispose(); disposed = true; }
+    public void Shutdown() { if (disposed) return; StopAll(); Trace("session_end"); journal?.Dispose(); journal = null; session.Dispose(); provider.Dispose(); disposed = true; }
     public void RefreshConnections()
     {
         StopAll(); expressionBackoff.Success(); memoryBackoff.Success(); nextMemory = 0;
@@ -414,6 +543,7 @@ public sealed class SYMGame : GameComponent
     {
         expressionBackoff.Fail(RealTime, e is ProviderException p ? p.RetryAfterSeconds : 0);
         Status = ProviderClient.SafeError(e);
+        Trace("error", detail: Status);
     }
     private void StartMemory(double now)
     {
@@ -426,6 +556,7 @@ public sealed class SYMGame : GameComponent
         var config = SYMMod.Instance.Settings;
         var connection = (config.SeparateMemoryModel ? config.MemoryConnection : config.Connection).Copy();
         string key = Credentials.Read(connection);
+        journal?.AddSecret(key);
         try { ProviderClient.ValidateConfiguration(connection, key); }
         catch (Exception e) { MemoryFailed(e); return; }
         if (!budget.TrySpend(now, Settings.RequestsPerMinute)) return;
@@ -438,7 +569,10 @@ public sealed class SYMGame : GameComponent
         memoryIds = memories.Select(m => m.Id).ToHashSet();
         var input = SYMJson.Write(new { pawn = snapshot, previousVoice = memoryProfile.Voice, memories, colonyRule = State.ColonyRule,
             annotation = memoryProfile.Annotation, style = Settings.Style.ToString(), language = Settings.Language, maxCharacters = Settings.EffectiveLimit });
+        memoryRequestId = Guid.NewGuid().ToString("N");
+        Trace("memory_request", request: memoryRequestId, system: Prompts.ProfileSystem, context: input, connection: connection, source: "ai-memory");
         memoryTask = provider.Generate(connection, key, Prompts.ProfileSystem, input, session.Token);
+        TraceCompletion(memoryTask, memoryRequestId, "ai-memory");
         RequestsStarted++; MemoryStatus = "Updating " + memoryProfile.Name + "…";
     }
     private void FinishMemory()
@@ -446,9 +580,11 @@ public sealed class SYMGame : GameComponent
         if (memoryTask?.IsCompleted != true) return;
         try
         {
-            var response = SYMJson.Read<ProfileResponse>(memoryTask.GetAwaiter().GetResult());
+            string raw = memoryTask.GetAwaiter().GetResult();
+            Trace("memory_response", request: memoryRequestId, response: raw, source: "ai-memory");
+            var response = SYMJson.Read<ProfileResponse>(raw);
             var profile = memoryProfile!;
-            if (memorySignature != Prompts.Signature(Settings, State.ColonyRule, profile)) return;
+            if (memorySignature != Prompts.Signature(Settings, State.ColonyRule, profile)) { Trace("memory_rejected", request: memoryRequestId, detail: "Player instructions or settings changed while waiting."); return; }
             if (string.IsNullOrWhiteSpace(response.Voice) || response.Voice.Length > 3000) throw new FormatException("Invalid personality response.");
             profile.Voice = TextPolicy.Clean(response.Voice); profile.Fingerprint = memoryFingerprint; profile.LastProfileFacts = memoryFacts; profile.UpdatedDay = Day;
             foreach (var score in response.Scores ?? new())
@@ -461,12 +597,14 @@ public sealed class SYMGame : GameComponent
             profile.Fallbacks = (response.Fallbacks ?? new()).Where(f => f != null).Select(TextPolicy.Clean).Where(f => TextPolicy.Valid(f, Settings.EffectiveLimit)).Distinct().Take(8).ToList();
             profile.FallbackSignature = memorySignature;
             memoryBackoff.Success(); MemoryStatus = "Updated " + profile.Name + "."; State.Touch();
+            Trace("memory_applied", request: memoryRequestId, detail: "Profile " + profile.PawnId + " updated.", source: "ai-memory");
         }
         catch (Exception e) { MemoryFailed(e); }
         finally { memoryTask = null; memoryProfile = null; }
     }
     private void MemoryFailed(Exception e)
     {
+        Trace("memory_error", request: memoryRequestId, detail: ProviderClient.SafeError(e), source: "ai-memory");
         memoryBackoff.Fail(RealTime, e is ProviderException p ? p.RetryAfterSeconds : 0);
         MemoryStatus = ProviderClient.SafeError(e);
     }
