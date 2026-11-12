@@ -17,7 +17,9 @@ public static class SaveCodec
         foreach (var p in state.Profiles)
         {
             p.Name ??= p.PawnId; p.Voice ??= ""; p.Annotation ??= ""; p.Fingerprint ??= ""; p.LastProfileFacts ??= "";
-            p.FallbackSignature ??= ""; p.ObservedFacts ??= ""; p.ObservedHealth ??= "";
+            p.FallbackSignature ??= ""; p.FallbackCommunication ??= ""; p.ObservedFacts ??= ""; p.ObservedHealth ??= "";
+            if (!double.IsFinite(p.LastWorkDay)) p.LastWorkDay = -1;
+            if (!double.IsFinite(p.NextProfileDay)) p.NextProfileDay = 0;
             if (p.Memories == null || p.Fallbacks == null || !double.IsFinite(p.UpdatedDay)) throw new FormatException("The SpeakYourMind profile is invalid.");
             foreach (var m in p.Memories) Validate(m);
             p.Fallbacks.RemoveAll(f => string.IsNullOrWhiteSpace(f));
@@ -27,10 +29,10 @@ public static class SaveCodec
         {
             if (t == null || string.IsNullOrEmpty(t.Id) || t.Participants == null || !double.IsFinite(t.Day) || string.IsNullOrEmpty(t.SpeakerId) || string.IsNullOrWhiteSpace(t.Text))
                 throw new FormatException("The SpeakYourMind transcript is invalid.");
-            t.SpeakerName ??= t.SpeakerId; t.ExchangeId ??= ""; t.Trigger ??= ""; t.Source ??= "ai";
+            t.SpeakerName ??= t.SpeakerId; t.ExchangeId ??= ""; t.RequestId ??= ""; t.Trigger ??= ""; t.Source ??= "ai";
             if (!t.Participants.Contains(t.SpeakerId)) t.Participants.Add(t.SpeakerId);
         }
-        state.Touch(); return state;
+        state.TouchTranscript(); return state;
     }
     private static void Validate(Memory m)
     {
@@ -38,5 +40,7 @@ public static class SaveCodec
             throw new FormatException("The SpeakYourMind memory data is invalid.");
         m.Topic ??= ""; m.SubjectIds ??= new(); m.SubjectIds.RemoveAll(string.IsNullOrEmpty);
         m.Source ??= "game"; m.Perspective ??= "experienced"; m.Reason ??= "";
+        m.ScoreAttempts = Math.Clamp(m.ScoreAttempts, 0, MemoryWork.MaxScoreAttempts);
+        if (!double.IsFinite(m.NextScoreDay)) m.NextScoreDay = 0;
     }
 }

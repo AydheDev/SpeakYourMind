@@ -85,12 +85,15 @@ public sealed class ProviderClient : IDisposable
         var root = ValidateEndpoint(c.BaseUrl);
         if (key.Any(char.IsControl)) throw new ArgumentException("The API key contains a line break or control character. Paste only the key itself.");
         if (string.IsNullOrWhiteSpace(c.Model)) throw new ArgumentException("Choose a model first.");
+        string capabilityError = ModelCapabilities.Error(c);
+        if (capabilityError.Length > 0) throw new ArgumentException(capabilityError);
         if (string.IsNullOrWhiteSpace(key) && !root.IsLoopback) throw new ArgumentException("Add the API key for this server first.");
         return root;
     }
-    public async Task<string> Generate(Connection c, string key, string system, string context, CancellationToken token)
+    public async Task<string> Generate(Connection c, string key, string system, string context, CancellationToken token, RequestTrace? trace = null)
     {
-        var timer = Stopwatch.StartNew(); Metrics.Start();
+        trace ??= new RequestTrace(RequestPurpose.Preview);
+        var timer = Stopwatch.StartNew(); Metrics.Start(trace);
         bool success = false, cancelled = false; long? inputTokens = null, outputTokens = null;
         try
         {
@@ -109,7 +112,7 @@ public sealed class ProviderClient : IDisposable
             string result = Extract(c.Provider, content); success = true; return result;
         }
         catch (OperationCanceledException) { cancelled = token.IsCancellationRequested; throw; }
-        finally { Metrics.Finish(success, cancelled, timer.Elapsed.TotalSeconds, inputTokens, outputTokens); }
+        finally { Metrics.Finish(success, cancelled, timer.Elapsed.TotalSeconds, inputTokens, outputTokens, trace); }
     }
 
     public static string Extract(ProviderKind provider, string content)

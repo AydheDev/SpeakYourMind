@@ -30,6 +30,7 @@ public static class Suite
         JsonModeTests.Run().GetAwaiter().GetResult();
         OptionalDialogueTests.Run();
         ImprovementTests.Run();
+        ReviewTests.Run();
         return "PASS: " + assertions + " assertions (memory, history, provider requests/responses, mocked transport, budget, serialization, core policies; game contracts only in the full game-dependent suite).";
     }
     private static void Memories()

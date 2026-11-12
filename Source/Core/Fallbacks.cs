@@ -1,5 +1,6 @@
 using System;
 using System.Linq;
+using System.Collections.Generic;
 
 namespace SpeakYourMind.Core;
 
@@ -17,6 +18,7 @@ public static class FallbackPolicy
         "vsie" => s.VSIEFallback,
         "rumor" => s.RumorFallback,
         "callouts" => s.CalloutsFallback,
+        "game" => s.NativeSocialWhenUnavailable,
         _ => false
     };
     public static string Rejection(FallbackCandidate? candidate, GenerationContext context, Preferences settings)
@@ -27,14 +29,24 @@ public static class FallbackPolicy
         if (context.ColonyRule.Length > 0 || context.Profiles.Any(p => p.Annotation.Length > 0)) return "Player instructions exclude unvalidated mod text.";
         if (!string.Equals(candidate.Language, context.Language.Trim(), StringComparison.OrdinalIgnoreCase)) return "Source language does not match the expression language.";
         if (context.Pawns.Count == 0 || context.Pawns[0].Animal || context.Pawns[0].Mechanoid) return "Unverified species-specific source text.";
+        if (!context.Pawns[0].CanSpeak) return "Unverified text for a pawn unable to speak.";
         if (candidate.Narration && context.Style == ExpressionStyle.Dialogue || !candidate.Narration && context.Style == ExpressionStyle.Narration) return "Source text does not match the selected communication style.";
         return "";
     }
     public static string Label(string source) => source switch
     {
         "speakup" => "SpeakUp / installed extensions", "vsie" => "Vanilla Social Interactions Expanded",
-        "rumor" => "Rumor Has It", "callouts" => "Callouts", _ => source
+        "rumor" => "Rumor Has It", "callouts" => "Callouts", "game" => "Original interaction", _ => source
     };
+    public static List<string> Generic(PawnSnapshot pawn, Profile profile, Preferences settings, string colonyRule)
+    {
+        var options = profile.FallbackSignature == Prompts.Signature(settings, colonyRule, profile) && profile.FallbackCommunication == pawn.Communication
+            ? profile.Fallbacks.Where(f => TextPolicy.Valid(f, settings.EffectiveLimit)).ToList() : new List<string>();
+        if (options.Count == 0 && colonyRule.Length == 0 && profile.Annotation.Length == 0 && settings.Language == "English" && !pawn.Animal && !pawn.Mechanoid)
+            options = settings.Style == ExpressionStyle.Narration || !pawn.CanSpeak ? new() { "Pauses a moment.", "Glances around.", "Shifts quietly." } : new() { "Hmm…", "Well…", "Ah…" };
+        options.RemoveAll(t => !TextPolicy.Valid(t, settings.EffectiveLimit));
+        return options;
+    }
 }
 
 public static class ConversationPolicy

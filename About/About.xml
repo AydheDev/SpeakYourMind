@@ -3,7 +3,7 @@
   <name>SpeakYourMind</name>
   <author>AydheDev</author>
   <packageId>aydhe.speakyourmind</packageId>
-  <modVersion>0.4.0</modVersion>
+  <modVersion>0.5.0</modVersion>
   <supportedVersions><li>1.7</li></supportedVersions>
   <description>Give your pawns a voice—and something worth saying. Contextual AI expressions, short exchanges, creature-appropriate reactions, persistent memories and readable history. Display only: generated text never changes relationships, moods or jobs. Requires Harmony and exactly one compatible Interaction Bubbles implementation. Interaction Bubbles Expanded is the primary 1.7 target. Configure a provider or local model in mod settings before enabling generation. This is an early development build.</description>
   <modDependencies><li><packageId>brrainz.harmony</packageId><displayName>Harmony</displayName><steamWorkshopUrl>steam://url/CommunityFilePage/2009463077</steamWorkshopUrl></li></modDependencies>

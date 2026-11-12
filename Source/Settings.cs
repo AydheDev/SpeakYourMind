@@ -42,6 +42,8 @@ public sealed class SYMMod : Mod
     public SYMMod(ModContentPack pack) : base(pack)
     {
         Instance = this; Settings = GetSettings<SYMSettings>();
+        characterBuffer = Settings.Preferences.MaxCharacters.ToString(); pawnDaysBuffer = Settings.Preferences.PawnHistoryDays.ToString();
+        colonyDaysBuffer = Settings.Preferences.ColonyHistoryDays.ToString(); fallbackDelayBuffer = Settings.Preferences.FallbackDelaySeconds.ToString(); debugLimitBuffer = Settings.Preferences.DebugSessionMegabytes.ToString();
         LongEventHandler.ExecuteWhenFinished(Integration.Initialize);
     }
     public override string SettingsCategory() => "SpeakYourMind";
@@ -54,10 +56,16 @@ public sealed class SYMMod : Mod
         l.Label("Bubble integration: " + Integration.Status);
         if (l.ButtonText("Guided AI setup")) Find.WindowStack.Add(new SetupWindow(Settings.Connection));
         l.CheckboxLabeled("Enable contextual expressions", ref s.Enabled);
-        l.CheckboxLabeled("Use original social bubbles when AI is unavailable or its request budget is exhausted", ref s.NativeSocialWhenUnavailable);
-        l.Label("Original bubbles follow their own mod rules and are not included in the SpeakYourMind transcript.");
+        l.CheckboxLabeled("Allow original interaction text as a checked quick reply", ref s.NativeSocialWhenUnavailable);
+        l.Label("Quick replies must pass language, style, species, player-note and length checks. Displayed replies are included in history. If a note prevents using original text, only a matching cached generic reply can be used.");
         l.CheckboxLabeled("Open dialogue history when clicking speech bubbles", ref s.ClickBubblesOpenHistory);
-        l.Label("Open transcripts, memories and instructions from the Voices tab in the bottom menu. Bubble clicks are optional and off by default.");
+        l.Label("Open conversations, memories, Pawn notes and Colony rules from the Voices tab in the bottom menu.");
+        if (l.ButtonText("Edit a character's personal note") && SYMGame.Current is { } notesGame)
+        {
+            string id = Find.Selector.SingleSelectedThing is Pawn selected ? notesGame.ProfileFor(selected).PawnId : "";
+            Find.WindowStack.Add(new HistoryWindow(id, "Pawn notes"));
+        }
+        if (l.ButtonText("Edit colony-wide rules") && SYMGame.Current != null) Find.WindowStack.Add(new HistoryWindow(mode: "Colony rules"));
         l.Label("Connection: " + Settings.Connection.Provider + " / " + Settings.Connection.Model);
         l.Label("Status: " + (SYMGame.Current?.Status ?? "Load a colony to begin."));
         if (SYMGame.Current is { } game)
@@ -67,9 +75,15 @@ public sealed class SYMMod : Mod
             l.Label("Memory: " + game.MemoryStatus);
             var metrics = game.Metrics;
             l.Label("Requests: " + metrics.InFlight + " active · " + metrics.Completed + " completed · " + metrics.Failed + " failed · " + metrics.Cancelled + " cancelled");
-            l.Label("Response time: last " + metrics.LastSeconds.ToString("F1") + " s · average " + metrics.AverageSeconds.ToString("F1") + " s (dialogue and memory)");
+            foreach (var purpose in Enum.GetValues<RequestPurpose>())
+            {
+                var usage = game.Usage(purpose);
+                l.Label(purpose + ": " + usage.Started + " requests · average " + usage.AverageSeconds.ToString("F1") + " s · " + usage.InputTokens + " input / " + usage.OutputTokens + " output tokens (usage reported for " + usage.ResponsesWithUsage + ")");
+            }
+            var dialogue = game.Usage(RequestPurpose.Dialogue);
+            l.Label("AI requests with visible text: " + dialogue.VisibleRequests + " · ended without visible AI text: " + dialogue.DiscardedRequests + " · reported tokens on those discarded requests: " + dialogue.DiscardedInput + " input / " + dialogue.DiscardedOutput + " output");
             l.Label("Reported token usage: " + metrics.InputTokens + " input / " + metrics.OutputTokens + " output · usage returned for " + metrics.ResponsesWithUsage + " of " + metrics.Started + " requests. Missing usage is not estimated; cancelled requests may still be billed.");
-            l.Label("Discarded exchanges: " + game.Discarded + " · original social fallbacks: " + game.NativeFallbacks);
+            l.Label("Discarded exchanges: " + game.Discarded + " · checked original-text fallbacks: " + game.NativeFallbacks);
             l.Label("This session: " + game.RequestsStarted + " requests · " + game.ExpressionsShown + " expressions · " + game.ActiveBubbles + " bubbles · " + game.Queued + " queued");
             if (l.ButtonText("Copy diagnostic summary (no keys or conversation text)")) GUIUtility.systemCopyBuffer = Diagnostics.Summary();
             if (l.ButtonText("Retry connection now")) game.RefreshConnections();
@@ -88,6 +102,7 @@ public sealed class SYMMod : Mod
         l.GapLine();
         l.CheckboxLabeled("Social exchanges", ref s.Social);
         l.CheckboxLabeled("Needs and discomfort (including mod-added needs)", ref s.Needs);
+        if (l.ButtonText("Configure which end of each need means discomfort")) Find.WindowStack.Add(new NeedSettingsWindow());
         l.CheckboxLabeled("Health reactions", ref s.Health);
         l.CheckboxLabeled("Combat callouts and generic fallbacks", ref s.Combat);
         l.CheckboxLabeled("Colony events", ref s.Colony);
@@ -114,11 +129,12 @@ public sealed class SYMMod : Mod
         l.GapLine();
         l.CheckboxLabeled("Advanced: use a separate model for memory", ref Settings.SeparateMemoryModel);
         if (Settings.SeparateMemoryModel && l.ButtonText("Configure memory model")) Find.WindowStack.Add(new SetupWindow(Settings.MemoryConnection, true));
-        if (l.ButtonText("Open colony history and annotations") && Current.Game != null) Find.WindowStack.Add(new HistoryWindow());
-        l.Label("Player instructions are saved per colony. Select a pawn in the history window to add an individual instruction.");
+        if (l.ButtonText("Open Voices: history, memories and personal notes") && Current.Game != null) Find.WindowStack.Add(new HistoryWindow());
+        l.Label("Personal notes belong to individual characters and survive automatic profile updates. Colony rules apply to everyone. Both are stored in the colony save.");
         l.GapLine();
         l.CheckboxLabeled("Debug: record dialogue and full prompt context to local files", ref s.DebugLogging);
         l.Label("Off by default. Debug files contain pawn names, colony details, player instructions, prompts, model replies, fallback decisions and displayed text. API credentials and request headers are excluded. Nothing is uploaded automatically. Review files before sharing.");
+        l.Label("With debug capture on, use Inspect / tune a line in Voices to mark problems and compare prompts using the same captured situation. The latest 24 requests remain available until you leave the colony or turn capture off.");
         l.TextFieldNumericLabeled("Debug session size limit (MB; next session)", ref s.DebugSessionMegabytes, ref debugLimitBuffer, 1, 1000);
         if (SYMGame.Current is { } debugGame)
         {
@@ -255,9 +271,11 @@ public sealed class SetupWindow : Window
                 if (connection.SendReasoning && l.ButtonText("Reasoning: " + connection.Reasoning))
                 {
                     var options = new List<FloatMenuOption>();
-                    foreach (var value in new[] { "low", "medium", "high", "none", "provider default" }) { var v = value; options.Add(new FloatMenuOption(v, () => connection.Reasoning = v)); }
+                    foreach (var value in ModelCapabilities.Options(connection)) { var v = value; options.Add(new FloatMenuOption(v, () => connection.Reasoning = v)); }
                     Find.WindowStack.Add(new FloatMenu(options));
                 }
+                l.Label(ModelCapabilities.Known(connection) == null ? "Custom or unrecognized model: reasoning support depends on your server. Use provider default if it rejects a reasoning field. A model appearing in the list does not prove generation compatibility." : "Known model: the reasoning menu shows its documented options. Low is the speed-oriented starting point.");
+                string modelError = ModelCapabilities.Error(connection); if (modelError.Length > 0) l.Label(modelError);
             }
             else l.Label("This connection currently uses the provider's default reasoning behaviour. Model-specific reasoning controls are not yet available here.");
             l.TextFieldNumericLabeled("Request timeout (seconds)", ref connection.TimeoutSeconds, ref timeoutBuffer, 3, 180);
@@ -327,7 +345,7 @@ public static class Diagnostics
         var c = SYMMod.Instance.Settings.Connection;
         var g = SYMGame.Current;
         // Deliberately exclude keys, endpoint addresses, prompts, annotations, names and transcript text.
-        return "SpeakYourMind 0.4.0\nRuntime: " + Environment.Version + "\nBubble integration: " + Integration.Status + "\nOptional adapters: " + OptionalDialogue.Status +
+        return "SpeakYourMind 0.5.0\nRuntime: " + Environment.Version + "\nBubble integration: " + Integration.Status + "\nOptional adapters: " + OptionalDialogue.Status +
             "\nProvider: " + c.Provider + "\nGeneration enabled: " + SYMMod.Instance.Settings.Preferences.Enabled +
             "\nRequests: " + (g?.RequestsStarted ?? 0) + "\nDisplayed: " + (g?.ExpressionsShown ?? 0) + "\nFallbacks: " + (g?.FallbacksShown ?? 0) +
             "\nRequest metrics: " + (g == null ? "No colony loaded" : g.Metrics.ToString()) + "\nOriginal social fallbacks: " + (g?.NativeFallbacks ?? 0) + "\nDiscarded: " + (g?.Discarded ?? 0) + "\nQueued: " + (g?.Queued ?? 0) + "\nActive bubbles: " + (g?.ActiveBubbles ?? 0) +
