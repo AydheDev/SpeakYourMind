@@ -20,13 +20,18 @@ public static class Suite
     public static string Run()
     {
         assertions = 0;
-        Memories(); History(); PromptsAndText(); Providers(); Serialization(); Budget(); ReflectionContracts();
+        Memories(); History(); PromptsAndText(); Providers(); Serialization(); Budget();
+#if !CORE_ONLY
+        ReflectionContracts();
+#endif
         Transport().GetAwaiter().GetResult();
         PolishTests.Run();
         ProviderErrorTests.Run().GetAwaiter().GetResult();
         JsonModeTests.Run().GetAwaiter().GetResult();
         OptionalDialogueTests.Run();
-        return "PASS: " + assertions + " assertions (memory, history, provider requests/responses, mocked transport, budget, serialization, installed 1.7 integration contracts).";
+        ImprovementTests.Run();
+        ReviewTests.Run();
+        return "PASS: " + assertions + " assertions (memory, history, provider requests/responses, mocked transport, budget, serialization, core policies; game contracts only in the full game-dependent suite).";
     }
     private static void Memories()
     {
@@ -128,6 +133,7 @@ public static class Suite
         Check(budget.TrySpend(60, 2), "sliding expiration");
         Check(!budget.TrySpend(60, 2), "no burst after expiration");
     }
+#if !CORE_ONLY
     private static void ReflectionContracts()
     {
         var game = typeof(Verse.Pawn).Assembly;
@@ -140,6 +146,7 @@ public static class Suite
         Check(game.GetType("Verse.Profile.MemoryUtility")!.GetMethod("ClearAllMapsAndWorld", flags) != null, "world cleanup hook");
         Check(typeof(ExpressionEntry).BaseType == typeof(Verse.LogEntry), "presentation log type");
     }
+#endif
     private sealed class StubHandler : HttpMessageHandler
     {
         public HttpStatusCode Code = HttpStatusCode.OK;

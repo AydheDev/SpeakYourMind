@@ -28,6 +28,8 @@ public enum ProviderKind { OpenAI, Compatible, Claude, Gemini }
 public sealed class Preferences
 {
     public bool Enabled;
+    public bool ClickBubblesOpenHistory = false;
+    public bool NativeSocialWhenUnavailable = true;
     public ExpressionStyle Style = ExpressionStyle.Hybrid;
     public ExpressionLength Length = ExpressionLength.Standard;
     public int Activity = 3, MaxCharacters = 0, MaxBubbles = 3, MaxTurns = 3, RequestsPerMinute = 12;
@@ -38,6 +40,7 @@ public sealed class Preferences
     public bool FollowUps = true;
     public int FallbackDelaySeconds = 6, DebugSessionMegabytes = 50;
     public string ColonyRule = "", Language = "English";
+    public List<string> HighBadNeeds = new();
     public int EffectiveLimit => MaxCharacters > 0 ? Math.Clamp(MaxCharacters, 1, 2000) : Length switch { ExpressionLength.Brief => 100, ExpressionLength.Descriptive => 420, _ => 240 };
     public bool Allows(Trigger t) => t switch { Trigger.Social => Social, Trigger.Needs => Needs, Trigger.Health => Health, Trigger.Combat => Combat, Trigger.Colony => Colony, _ => Observation };
     public void Normalize()
@@ -51,6 +54,7 @@ public sealed class Preferences
         MemoryExponent = float.IsFinite(MemoryExponent) ? Math.Clamp(MemoryExponent, 0.2f, 4) : 1.4f;
         Language = string.IsNullOrWhiteSpace(Language) ? "English" : TextPolicy.Clean(Language);
         ColonyRule ??= "";
+        HighBadNeeds ??= new();
         FallbackDelaySeconds = Math.Clamp(FallbackDelaySeconds, 2, 30); DebugSessionMegabytes = Math.Clamp(DebugSessionMegabytes, 1, 1000);
     }
 }
@@ -84,27 +88,37 @@ public sealed class PawnSnapshot
     public Dictionary<string, float> Needs = new();
     public Dictionary<string, float> Stats = new();
     public string Environment = "";
+    public bool Awake = true;
+    public bool CanSpeak = true;
+    public string Communication = "";
+    public List<string> RelationshipFacts = new(), Facilities = new();
 }
 public sealed class Memory
 {
     public string Id = Guid.NewGuid().ToString("N"), Fact = "", Source = "game", Perspective = "experienced", Reason = "";
+    public string Topic = "";
+    public List<string> SubjectIds = new();
     public double Day;
     public float Importance = 0.1f;
     public bool Scored;
+    public int ScoreAttempts;
+    public double NextScoreDay;
 }
 public sealed class Profile
 {
     public string PawnId = "", Name = "", Voice = "", Annotation = "", Fingerprint = "", LastProfileFacts = "";
     public double UpdatedDay;
+    public double LastWorkDay = -1, NextProfileDay;
     public bool Persistent = true;
     public List<Memory> Memories = new();
     public List<string> Fallbacks = new();
     public string FallbackSignature = "";
+    public string FallbackCommunication = "";
     public string ObservedFacts = "", ObservedHealth = "";
 }
 public sealed class TranscriptEntry
 {
-    public string Id = Guid.NewGuid().ToString("N"), ExchangeId = "", SpeakerId = "", SpeakerName = "", Text = "", Trigger = "", Source = "ai";
+    public string Id = Guid.NewGuid().ToString("N"), ExchangeId = "", RequestId = "", SpeakerId = "", SpeakerName = "", Text = "", Trigger = "", Source = "ai";
     public List<string> Participants = new();
     public double Day;
 }
@@ -116,8 +130,11 @@ public sealed class SaveState
     public List<Memory> ColonyEvents = new();
     public List<TranscriptEntry> Transcript = new();
     [System.Text.Json.Serialization.JsonIgnore] public long Revision { get; private set; }
+    [System.Text.Json.Serialization.JsonIgnore] public long TranscriptRevision { get; private set; }
+    [System.Text.Json.Serialization.JsonIgnore] public long TranscriptReset { get; private set; }
     public void Touch() => Revision++;
-    public void Record(TranscriptEntry entry) { Transcript.Add(entry); Touch(); }
+    public void TouchTranscript() { TranscriptRevision++; TranscriptReset++; Touch(); }
+    public void Record(TranscriptEntry entry) { Transcript.Add(entry); TranscriptRevision++; Touch(); }
     public Profile Profile(string id, string name, bool persistent)
     {
         var p = Profiles.Find(x => x.PawnId == id);
@@ -130,7 +147,8 @@ public sealed class SaveState
         int count = 0;
         foreach (var p in Profiles) count += p.Memories.RemoveAll(m => MemoryPolicy.Expired(m, day, settings));
         count += ColonyEvents.RemoveAll(m => MemoryPolicy.Expired(m, day, settings));
-        count += Transcript.RemoveAll(t => !HistoryPolicy.Visible(t.Day, day, settings.PawnHistoryDays) && !HistoryPolicy.Visible(t.Day, day, settings.ColonyHistoryDays));
+        int removed = Transcript.RemoveAll(t => !HistoryPolicy.Visible(t.Day, day, settings.PawnHistoryDays) && !HistoryPolicy.Visible(t.Day, day, settings.ColonyHistoryDays));
+        if (removed > 0) TouchTranscript();
         if (count > 0) Touch();
     }
 }
@@ -193,10 +211,14 @@ public static class ProfilePolicy
 public sealed class RequestBudget
 {
     private readonly Queue<double> starts = new();
-    public bool TrySpend(double now, int limit)
+    public bool Available(double now, int limit)
     {
         while (starts.Count > 0 && starts.Peek() <= now - 60) starts.Dequeue();
-        if (starts.Count >= Math.Max(1, limit)) return false;
+        return starts.Count < Math.Max(1, limit);
+    }
+    public bool TrySpend(double now, int limit)
+    {
+        if (!Available(now, limit)) return false;
         starts.Enqueue(now); return true;
     }
 }

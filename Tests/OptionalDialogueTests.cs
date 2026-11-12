@@ -4,17 +4,27 @@ using System.Linq;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Threading.Tasks;
+#if !CORE_ONLY
 using HarmonyLib;
 using RimWorld;
+#endif
 using SpeakYourMind.Core;
+#if !CORE_ONLY
 using Verse;
+#endif
 using static SpeakYourMind.Tests.Suite;
 
 namespace SpeakYourMind.Tests;
 
 public static class OptionalDialogueTests
 {
-    public static void Run() { Eligibility(); Continuations(); ReadScope(); SocialAdapter(); Journal(); }
+    public static void Run()
+    {
+        Eligibility(); Continuations(); Journal();
+#if !CORE_ONLY
+        ReadScope(); SocialAdapter();
+#endif
+    }
     private static void Eligibility()
     {
         var prefs = new Preferences(); var ctx = Prompts.Preview(prefs);
@@ -66,6 +76,7 @@ public static class OptionalDialogueTests
         unseen.Advance(0, false, true, true); unseen.Advance(10, false, true, true);
         Check(!unseen.CurrentWasDisplayed && !ConversationPolicy.ContinueAfterFallback(!unseen.CurrentWasDisplayed, true, false, true, new Preferences()), "unrendered fallback expiry cannot trigger a follow-up");
     }
+#if !CORE_ONLY
     private static void ReadScope()
     {
         var prefix = AccessTools.Method(typeof(OptionalDialogue), "EnsuePrefix");
@@ -97,6 +108,7 @@ public static class OptionalDialogueTests
         }
         finally { guarded.SetValue(null, old); }
     }
+#endif
     private static void Journal()
     {
         string root = Path.Combine(Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location)!, "debug-test-" + Guid.NewGuid().ToString("N"));

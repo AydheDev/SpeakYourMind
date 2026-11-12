@@ -82,7 +82,12 @@ public static class Integration
         if (dictionary?.GetValue(null) is IDictionary dict && dict.Contains(pawn))
         { var list = (IList)dict[pawn]!; list.Remove(instance); if (list.Count == 0) dict.Remove(pawn); }
     }
-    private static bool BubbleAddPrefix() => !Active;
+    private static bool BubbleAddPrefix(LogEntry __0)
+    {
+        if (!Active) return true;
+        try { return !SYMGame.Current!.ObserveSocial(__0); }
+        catch { Log.WarningOnce("[SpeakYourMind] An interaction could not be displayed safely; its text was skipped.", 17393015); return false; }
+    }
     private static bool FadePrefix(object __instance, ref float __result)
     {
         if (entry?.GetValue(__instance) is not ExpressionEntry own) return true;
@@ -99,7 +104,11 @@ public static class Integration
     private static bool NavigationPrefix(Pawn __0, LogEntry __1)
     {
         if (__1 is not ExpressionEntry) return true;
-        Find.WindowStack.Add(new HistoryWindow(__0.ThingID)); return false;
+        if (SYMMod.Instance.Settings.Preferences.ClickBubblesOpenHistory)
+            Find.WindowStack.Add(new HistoryWindow(__0.ThingID));
+        // Our presentation-only entries must never reach vanilla log navigation,
+        // including when clicking to open history is disabled.
+        return false;
     }
     private static void Observe(Action<SYMGame> action)
     {

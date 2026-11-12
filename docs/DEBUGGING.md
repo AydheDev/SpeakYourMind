@@ -22,6 +22,9 @@ Location: RimWorld's configuration folder, under `SpeakYourMind/Debug`. Every de
 | `fallback_selected` / `fallback_rejected` | Which optional source or generic preset was considered and why it was used or skipped. Selection is not proof of display. |
 | `fallback_attached` | Callouts supplied text for a pending reaction from the same pawn, category and simulation tick. It has not been selected or shown yet. |
 | `displayed` | A successful bubble draw, with exact text and speaker ID. This is what the player-facing transcript records. |
+| `fallback_selected` with source `game` | Original interaction text passed the common fallback policy. A later `displayed` event confirms the actual draw and history entry. |
+| `prompt_feedback` | Player classification of a captured example, with its frozen context and displayed text. |
+| `prompt_preview_request` / `prompt_preview_result` | Explicit prompt-lab comparison request/result; never inserted into production history or memories. |
 | `discarded` | Stale, hidden, interrupted or otherwise cancelled work. |
 | `exchange_finished` | Display and reading time completed. A permitted fresh follow-up can be scheduled afterward. |
 | `memory_applied` / `memory_rejected` / `memory_error` | Result of background profile work. |
@@ -38,3 +41,10 @@ The default 50 MB limit covers both files in one session and can be changed for 
 Prompts contain pawn names, biographies, colony events, memories and player instructions. These are deliberately included for tuning. API keys registered for the session and recognizable credential patterns are redacted; endpoints and HTTP headers are excluded. Avoid putting unrelated secrets in annotations. Review files before sharing. The separate **Copy diagnostic summary** button remains suitable when full colony text is unnecessary.
 
 For a useful report, include the offending `displayed` line, its request/context, your note, and any nearby fallback or rejection records. Describe whether the problem was wording, incorrect facts, repetition, age/species voice, tone, timing, or too much chatter. Prompt changes are made in the source; debug mode does not rewrite them automatically.
+## Prompt lab (0.5.0)
+
+Enable debug capture before the expression you want to examine. In Voices → Conversations, choose **Inspect / tune a line**. The lab shows its trigger, source and captured event, with optional full context. Mark a problem or good example to add feedback to the local journal.
+
+Baseline and variant buttons each make one extra AI request using the current dialogue connection and the exact same saved input snapshot. Experimental directions apply only to the variant, preserve the JSON contract, and never become active colony rules. Results are logged locally and never inserted into bubbles, transcripts or memories. Comparisons are explicitly requested previews, so they can run while this window pauses gameplay.
+
+The session cache holds the latest 24 requests with a combined size bound. It is cleared on disabling debug capture or leaving the colony. Lines outside that cache cannot reconstruct their original input; the UI says so rather than inventing a replay context. Full debug files retain the existing per-session disk cap.

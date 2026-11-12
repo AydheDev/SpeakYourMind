@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
@@ -14,6 +15,7 @@ namespace SpeakYourMind.Core;
 public sealed class ProviderClient : IDisposable
 {
     private readonly HttpClient http;
+    public RequestMetrics Metrics { get; } = new();
     public ProviderClient(HttpMessageHandler? handler = null)
     {
         http = new HttpClient(handler ?? new HttpClientHandler { AllowAutoRedirect = false });
@@ -83,24 +85,36 @@ public sealed class ProviderClient : IDisposable
         var root = ValidateEndpoint(c.BaseUrl);
         if (key.Any(char.IsControl)) throw new ArgumentException("The API key contains a line break or control character. Paste only the key itself.");
         if (string.IsNullOrWhiteSpace(c.Model)) throw new ArgumentException("Choose a model first.");
+        string capabilityError = ModelCapabilities.Error(c);
+        if (capabilityError.Length > 0) throw new ArgumentException(capabilityError);
         if (string.IsNullOrWhiteSpace(key) && !root.IsLoopback) throw new ArgumentException("Add the API key for this server first.");
         return root;
     }
-    public async Task<string> Generate(Connection c, string key, string system, string context, CancellationToken token)
+    public async Task<string> Generate(Connection c, string key, string system, string context, CancellationToken token, RequestTrace? trace = null)
     {
-        using var request = BuildRequest(c, key, system, context);
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
-        timeout.CancelAfter(TimeSpan.FromSeconds(Math.Clamp(c.TimeoutSeconds, 3, 180)));
-        using var response = await http.SendAsync(request, timeout.Token).ConfigureAwait(false);
-        if (!response.IsSuccessStatusCode)
+        trace ??= new RequestTrace(RequestPurpose.Preview);
+        var timer = Stopwatch.StartNew(); Metrics.Start(trace);
+        bool success = false, cancelled = false; long? inputTokens = null, outputTokens = null;
+        try
         {
-            double retryAfter = response.Headers.RetryAfter?.Delta?.TotalSeconds ?? (response.Headers.RetryAfter?.Date - DateTimeOffset.UtcNow)?.TotalSeconds ?? 0;
-            string error = await response.Content.ReadAsStringAsync(timeout.Token).ConfigureAwait(false);
-            throw new ProviderException(FriendlyError(response.StatusCode, error), Math.Clamp(retryAfter, 0, 600));
+            using var request = BuildRequest(c, key, system, context);
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
+            timeout.CancelAfter(TimeSpan.FromSeconds(Math.Clamp(c.TimeoutSeconds, 3, 180)));
+            using var response = await http.SendAsync(request, timeout.Token).ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode)
+            {
+                double retryAfter = response.Headers.RetryAfter?.Delta?.TotalSeconds ?? (response.Headers.RetryAfter?.Date - DateTimeOffset.UtcNow)?.TotalSeconds ?? 0;
+                string error = await response.Content.ReadAsStringAsync(timeout.Token).ConfigureAwait(false);
+                throw new ProviderException(FriendlyError(response.StatusCode, error), Math.Clamp(retryAfter, 0, 600));
+            }
+            var content = await response.Content.ReadAsStringAsync(timeout.Token).ConfigureAwait(false);
+            (inputTokens, outputTokens) = RequestMetrics.Usage(c.Provider, content);
+            string result = Extract(c.Provider, content); success = true; return result;
         }
-        var content = await response.Content.ReadAsStringAsync(token).ConfigureAwait(false);
-        return Extract(c.Provider, content);
+        catch (OperationCanceledException) { cancelled = token.IsCancellationRequested; throw; }
+        finally { Metrics.Finish(success, cancelled, timer.Elapsed.TotalSeconds, inputTokens, outputTokens, trace); }
     }
+
     public static string Extract(ProviderKind provider, string content)
     {
         using var doc = JsonDocument.Parse(content);

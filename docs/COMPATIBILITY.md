@@ -28,7 +28,7 @@ References: [maintained source](https://github.com/emipa606/RoumorHasIt), [metad
 
 ## Callouts
 
-The adapter checks `CM_Callouts.CalloutTracker.RequestCallout` and its attached/floating text paths. It captures text that Callouts already resolved, inside a scoped request. It does not run Callouts' random selection or grammar a second time. Native output is suppressed only when SpeakYourMind accepts that exact event. Rejected, disabled, off-screen, conflicting or unsupported cases keep the native output. Wound damage-number motes and unrelated floating text are not intercepted.
+The adapter checks `CM_Callouts.CalloutTracker.RequestCallout` and its attached/floating text paths. It captures text that Callouts already resolved, inside a scoped request. It does not run Callouts' random selection or grammar a second time. When this adapter is enabled and active, matching output is routed through SpeakYourMind; rejected, off-screen or conflicting lines are suppressed rather than bypassing player notes through a native mote. Disabling the adapter or encountering an unsupported interface preserves native behavior. Wound damage-number motes and unrelated floating text are not intercepted.
 
 Both attached and floating Callouts modes are covered by the known interface. A changed signature disables the optional hooks while preserving the base mod. The reviewed maintained Callouts release (`Mlie.Callouts`) lists versions through 1.6; this adapter is not a port of Callouts to 1.7. Other forks with the same interface can be detected, but require playtesting.
 

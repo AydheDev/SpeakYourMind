@@ -17,6 +17,7 @@ public sealed class ExchangeDelivery
     public bool HasResult => turns != null;
     public bool IsFallback { get; private set; }
     public bool CurrentWasDisplayed => recorded;
+    public bool HasDisplayedAny { get; private set; }
     public Turn? Current => index >= 0 && turns != null ? turns[index] : null;
     public bool Accept(IEnumerable<Turn> result, bool fallback = false)
     {
@@ -49,7 +50,7 @@ public sealed class ExchangeDelivery
     public Turn? MarkRendered(double now)
     {
         if (ended || recorded || Current == null) return null;
-        recorded = true; renderedAt = now; return Current;
+        recorded = true; HasDisplayedAny = true; renderedAt = now; return Current;
     }
     public void Cancel() => ended = true;
 }

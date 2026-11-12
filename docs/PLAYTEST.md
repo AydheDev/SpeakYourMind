@@ -1,10 +1,23 @@
-# 0.3.3 home playtest checklist
+# 0.5.0 home playtest checklist
+
+## 0.5.0 focused checks
+
+1. Open Voices → Pawn notes before any AI dialogue. Choose a colonist, prisoner, animal or visitor. Add different notes to two characters and a separate colony rule. Check generated expressions, change one note mid-request, then save/reload and verify both notes remain independent.
+2. Exhaust the request budget or use an invalid model temporarily. Confirm eligible fallback text appears in history once; original text never bypasses personal notes, language, style or character limits. Remove the temporary error afterward.
+3. Watch a visible awake pawn's Food need cross 25%. Verify a reaction without repeated threshold-jitter spam. For a supported mod need, change its direction in settings and check the corresponding high-value crossing.
+4. Confirm sleeping pawns stay quiet, a pawn unable to speak uses gestures, and expressions do not invent absent or inaccessible toilets from an incomplete inventory.
+5. Enable debug capture, generate dialogue, then Inspect / tune a line. Mark a problem, compare baseline/variant, and verify both use the same captured event and note even if live context has changed. Closing the comparison must cancel pending work; no preview enters colony history or memories.
+6. Check separate dialogue/memory/preview usage totals and incomplete-usage labels. Cancel a pending request or allow a fallback; known discarded usage should be distinct from visible AI output.
+7. Open a long conversation history while profiles update. Scroll, search and switch pawns; new replies should join their existing conversation without moving unrelated lines or retaining expired entries.
+8. Inspect memory work over time: personality should remain stable during score-only batches. Missing scores are deferred, other pawns progress, and Retry missing scores schedules only unscored facts.
+
+## General checks
 
 Use a disposable colony first. This checklist is not a record of completed in-game validation.
 
 1. **Startup:** Harmony → Expanded → SpeakYourMind. Verify no red startup errors. Without either bubble mod, verify the settings explain the missing dependency and no patches suppress existing behaviour.
 2. **Guided setup:** choose a provider/local server; enter a key; fetch a model list or enter a model; test; inspect the fictional preview and latency; then save. Cancel an edited connection and confirm the old one still works. Change the key/model after a test and confirm another test is required. Try wrong model/key and stopped local server. Confirm messages contain no credentials.
-3. **Social:** observe two selected/visible pawns interacting. Dots replace original bubble text, then all accepted turns appear sequentially with time to read. Pawns should not participate in two exchanges simultaneously. The native log remains intact. Verify clicks open SpeakYourMind history.
+3. **Social:** observe two selected/visible pawns interacting. Dots replace original bubble text, then all accepted turns appear sequentially with time to read. Pawns should not participate in two exchanges simultaneously. The native log remains intact. Open **Voices** from the bottom menu and check transcripts, memories and instructions. On both fresh and upgraded settings, bubble clicks should not open history by default. Enable **Open dialogue history when clicking speech bubbles** and verify an Expanded bubble opens the clicked pawn's history. Turn it off and verify clicks open neither SpeakYourMind history nor the native log viewer, while Voices remains available. Restart with each setting and verify the preference persists. Non-SpeakYourMind entries should retain the bubble mod's own navigation behavior.
 4. **Needs:** observe a hungry pawn, then let them eat before a slow reply returns. The old hunger reply should be discarded. Mod-added needs should be named without inventing missing buildings.
 5. **Animals/mechs:** enable normal activity near them. Check species-appropriate nonverbal output and no invented human speech.
 6. **Combat:** observe shots/misses and damage. Callouts must not invent successful hits. Simulate a slow service and check generic fallback, no late overwrite, no repeated identical fallback.
@@ -30,3 +43,14 @@ Use a disposable colony first. This checklist is not a record of completed in-ga
 26. **Debug limits:** use a small session limit, restart logging, and confirm a visible limit marker/status rather than silent loss or a game pause. Restore the usual limit afterward. Keep the full logs for prompt tuning.
 
 Start with startup, setup, one social exchange, pause/resume, and save/load. Once those pass, work through the remaining scenarios. Record the mod version, model, reasoning setting, approximate response delay and any visible error. The copied diagnostic summary helps report problems without sharing colony text.
+
+
+## 0.4.0 additional checks
+
+27. Start a multi-turn exchange, then increase simulation speed. Each displayed turn should keep its reading time; stale requests that have never displayed should still expire. Pause between turns, change maps, and disable generation to verify those cancellation paths remain intact.
+28. Repeated idle/work topics should become less frequent. Change jobs or social partners; new topics should regain priority. Observe urgent events during cooldowns. Test word-overlap repetition filtering with both short callouts and longer similar phrases.
+29. Give a pawn many permanent memories plus a recent experience with their current listener. Inspect debug prompt context: listener/topic, recent and defining memories should all have space, with at most fourteen unique entries. Load an older save and verify memories/annotations persist.
+30. Exhaust the request budget and stop the service. With original interaction quick replies enabled, eligible text should pass the common checks and appear once in the SpeakYourMind transcript after display. Player notes, language, species, style and length must block incompatible source text. Toggle the policy off and verify generic/optional fallback behavior. There must be no unchecked native restoration or simultaneous native and AI version of the same event.
+31. In Voices, switch between the three views, filter pawn names, select an existing or departed pawn, search one turn, and verify the whole retained exchange appears chronologically. Check same-tick turn order, retention boundaries, pagination and narrow resolutions.
+32. Verify request counts, last/average latency and reported tokens against a small known provider session. Missing usage must not be presented as complete billing. Test cancellation, timeout, failed HTTP requests and a separate memory connection.
+33. Run `install.ps1` with RimWorld closed. Verify the old mod is backed up outside Mods, the installed DLL matches its manifest and existing saves/settings/credentials remain. A running game, wrong game version, ambiguous dependencies or failed tests must stop installation.

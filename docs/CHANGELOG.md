@@ -1,5 +1,32 @@
 # Changes
 
+## 0.5.0 — personal notes, prompt tuning and review fixes
+
+- Added dedicated Pawn notes and Colony rules views, a personal-note shortcut in settings, and current-pawn selection before first dialogue. Personal notes remain separate from automatically managed profiles and persist in the existing save format.
+- Removed unchecked original-bubble restoration. Original and optional replies use the common fallback policy, confirmed-draw transcript and timing; generic cached replies now support non-combat situations too. Speech incapacity invalidates unsuitable source text and cached filler.
+- Separated malformed/overlong individual replies from provider outages. One rejected expression no longer starts a colony-wide service backoff.
+- Added separate score-only memory jobs, fair profile scheduling, delayed missing-ID retries and a three-attempt bound. Unscored facts remain protected; the Memories screen can retry them explicitly. Unchanged personality text is no longer regenerated daily or for score-only work.
+- Fixed need threshold crossings, added recovery hysteresis and reminders, and exposed low-bad/high-bad configuration for mod needs.
+- Separated transcript invalidation from profile changes and incrementally updated conversation groups on append.
+- Split reported tokens and latency by dialogue, memory and preview; track visible AI requests and known usage on discarded requests without inventing billing data.
+- Added background descriptions, speech/hearing capacity, sleep filtering and explicit inventory/facility evidence limits. Stable relationship facts no longer change whenever opinion changes.
+- Added debug-only prompt comparison and feedback on individual history lines. Tests reuse the captured context, are explicitly triggered, and never enter gameplay history or memory.
+- Added documented reasoning menus for recognized OpenAI Sol/Terra/Luna IDs, preserving custom/local model flexibility. Fixed numeric preference fields that appeared blank.
+- Validation: 436 automated assertions against the installed 1.7 game assemblies. In-game UI/colony behavior, live providers and optional mod combinations still require playtesting.
+
+## 0.4.0 — conversation reliability and usability (source update)
+
+- Added **Open dialogue history when clicking speech bubbles** to mod settings, off by default for new and existing settings. With Expanded, enabling it opens the clicked pawn's history; disabling it suppresses navigation for SpeakYourMind bubbles without sending their synthetic entries to the native log viewer.
+- The existing **Voices** bottom-menu tab remains the main entry point for transcripts, memories and instructions.
+- Displayed conversations retain their reading time at faster simulation speeds; unspoken events still expire.
+- Added activity-dependent topic suppression, novelty/need/social salience priorities, and conservative similar-line rejection.
+- Added participant/topic memory metadata and bounded mixed retrieval (context, recent life and defining memories), compatible with version-1 saves.
+- Added configurable original social bubble fallback during outages/request-budget exhaustion and after failed AI requests. A shared per-log-entry decision avoids double observation across hook orderings.
+- Replaced the history mode dropdown with Conversations / Memories / Instructions views, grouped exchanges and pawn-name filtering.
+- Added thread-safe transport metrics and optional provider token usage, with explicit incomplete-usage reporting.
+- Added a standalone .NET 10 core runner and Windows build/test/install script with verified staging, backup and rollback.
+- Development validation: 355 core assertions and 9 installer transaction checks passed. Full game compilation, Windows discovery and in-game behavior remain pending; see `PLAYTEST.md`.
+
 ## 0.3.3 — explicit JSON input and visible setup numbers
 
 - OpenAI requests now explicitly request JSON in the input as well as the separate instructions field. This addresses the JSON-mode input guard that can reject requests whose actual input lacks the word JSON; it applies to previews, dialogue and memory work.
